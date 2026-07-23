@@ -7,7 +7,7 @@ vi.mock("../repositories/renewalJobs.js", () => ({
 }));
 
 import { findRenewalJob, markHubspotUpdated } from "../repositories/renewalJobs.js";
-import { updateHubspotDeal } from "./updateHubspotDeal.js";
+import { updateHubspotDeal } from "../steps/updateHubspotDeal.js";
 
 const fakeSupabase = {} as SupabaseClient;
 

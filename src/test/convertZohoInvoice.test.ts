@@ -16,7 +16,7 @@ import {
   markInvoiceStepDone,
   markInvoiceStepFailed,
 } from "../repositories/renewalJobs.js";
-import { convertZohoInvoice } from "./convertZohoInvoice.js";
+import { convertZohoInvoice } from "../steps/convertZohoInvoice.js";
 
 const fakeSupabase = {} as SupabaseClient;
 

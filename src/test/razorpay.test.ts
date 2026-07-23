@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPaymentLink, verifyWebhookSignature } from "./razorpay.js";
+import { createPaymentLink, verifyWebhookSignature } from "../clients/razorpay.js";
 
 const originalFetch = global.fetch;
 

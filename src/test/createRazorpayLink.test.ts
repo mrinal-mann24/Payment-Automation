@@ -16,7 +16,7 @@ import {
   markRazorpayStepDone,
   markRazorpayStepFailed,
 } from "../repositories/renewalJobs.js";
-import { createRazorpayLink } from "./createRazorpayLink.js";
+import { createRazorpayLink } from "../steps/createRazorpayLink.js";
 
 const fakeSupabase = {} as SupabaseClient;
 

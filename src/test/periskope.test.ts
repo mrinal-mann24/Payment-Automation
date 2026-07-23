@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendDocumentMessage } from "./periskope.js";
+import { sendDocumentMessage } from "../clients/periskope.js";
 
 const originalFetch = global.fetch;
 

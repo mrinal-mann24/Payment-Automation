@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { daysOverdue, nextDueStage, parseDueDate } from "./reminderCron.js";
+import { daysOverdue, nextDueStage, parseDueDate } from "../jobs/reminderCron.js";
 
 const baseJob = {
   id: "job-1",

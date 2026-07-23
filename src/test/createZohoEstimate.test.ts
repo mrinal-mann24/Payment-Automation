@@ -23,7 +23,7 @@ import {
   markZohoStepDone,
   markZohoStepFailed,
 } from "../repositories/renewalJobs.js";
-import { createZohoEstimate } from "./createZohoEstimate.js";
+import { createZohoEstimate } from "../steps/createZohoEstimate.js";
 
 const fakeSupabase = {} as SupabaseClient;
 

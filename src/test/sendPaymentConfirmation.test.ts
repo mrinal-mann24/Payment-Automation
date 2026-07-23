@@ -24,7 +24,7 @@ import {
   markPaymentConfirmedSent,
   markPaymentConfirmedSkipped,
 } from "../repositories/renewalJobs.js";
-import { sendPaymentConfirmation } from "./sendPaymentConfirmation.js";
+import { sendPaymentConfirmation } from "../steps/sendPaymentConfirmation.js";
 
 const fakeSupabase = {} as SupabaseClient;
 

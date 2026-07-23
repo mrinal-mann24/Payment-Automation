@@ -24,7 +24,7 @@ import {
   markPeriskopeSent,
   markPeriskopeSkipped,
 } from "../repositories/renewalJobs.js";
-import { sendRenewalMessage } from "./sendRenewalMessage.js";
+import { sendRenewalMessage } from "../steps/sendRenewalMessage.js";
 
 const fakeSupabase = {} as SupabaseClient;
 

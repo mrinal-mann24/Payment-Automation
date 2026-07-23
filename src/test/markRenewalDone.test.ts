@@ -17,7 +17,7 @@ import {
   addLineItemToDeal,
 } from "../clients/hubspot.js";
 import { findRenewalJob, markHubspotRenewalDone } from "../repositories/renewalJobs.js";
-import { markRenewalDone } from "./markRenewalDone.js";
+import { markRenewalDone } from "../steps/markRenewalDone.js";
 
 const fakeSupabase = {} as SupabaseClient;
 

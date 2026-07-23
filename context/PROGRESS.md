@@ -73,6 +73,23 @@ Last updated: 2026-07-23 (step 5 implemented, not yet live-tested)
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-07-23 — Fixed a pre-existing bug surfaced by the first VPS Docker
+  build: all 11 files under `src/test/*.test.ts` imported the module under
+  test via a same-directory relative path (e.g.
+  `import { sendDocumentMessage } from "./periskope.js"`), but the real
+  files live in `src/clients/`, `src/steps/`, or `src/jobs/` — every *other*
+  import in those same files already correctly used `../clients/...` etc.,
+  only the file-under-test import was wrong. `vitest` apparently tolerated
+  or never actually exercised this (all 11 files/52 tests reported passing
+  before this fix too), but plain `tsc` (what `npm run build` runs, and
+  what the Docker build's `RUN npm run build` step hits) does not resolve
+  these paths and fails the whole build with 11 `TS2307` errors — this is
+  what broke the user's first `docker compose up --build` on the VPS.
+  Fixed each import to its correct relative path per the mapping above.
+  Verified locally: `npm run typecheck` clean, `npm test` 11/11 files,
+  52/52 tests passing (unchanged pass count, now for real). No production
+  (`src/clients`, `src/steps`, `src/jobs`, `src/repositories`, `src/routes`)
+  code touched.
 - 2026-07-23 — Added Docker deployment files: `Dockerfile` (multi-stage
   build using `node:22-alpine` — deliberately not `node:22-slim`, which a
   local vulnerability scan showed had *more* flagged critical/high CVEs

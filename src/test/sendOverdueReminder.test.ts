@@ -16,7 +16,7 @@ vi.mock("../repositories/renewalJobs.js", () => ({
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { sendTextMessage } from "../clients/periskope.js";
 import { findRenewalJob, markReminderSent, markReminderSkipped } from "../repositories/renewalJobs.js";
-import { sendOverdueReminder } from "./sendOverdueReminder.js";
+import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
 
 const fakeSupabase = {} as SupabaseClient;
 
