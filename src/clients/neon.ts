@@ -18,12 +18,16 @@ export interface DueRenewalDeal {
 }
 
 export async function findDealsWithRenewalDueToday(): Promise<DueRenewalDeal[]> {
+  // line_items is a per-cycle log (a deal can have many rows, one per past
+  // due date), so "due today" must compare against each deal's latest cycle,
+  // not any row that happens to equal today.
   const result = await getPool().query<{ record_id: string; deal_name: string | null }>(
-    `SELECT DISTINCT record_id, deal_name
+    `SELECT record_id, deal_name
      FROM line_items
      WHERE pipeline = $1
        AND deleted IS NULL
-       AND due_on = CURRENT_DATE`,
+     GROUP BY record_id, deal_name
+     HAVING MAX(due_on) = CURRENT_DATE`,
     [VA_PIPELINE_ID],
   );
 
