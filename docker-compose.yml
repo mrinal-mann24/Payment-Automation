@@ -4,6 +4,12 @@ services:
     container_name: payment-automation
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3030:3000"
     env_file:
       - .env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.payment-automation.rule=Host(`payment.187-127-173-25.sslip.io`)"
+      - "traefik.http.routers.payment-automation.entrypoints=websecure"
+      - "traefik.http.routers.payment-automation.tls.certresolver=letsencrypt"
+      - "traefik.http.services.payment-automation.loadbalancer.server.url=http://127.0.0.1:3030"
