@@ -129,6 +129,14 @@ export async function findOrCreateCustomer(
   return created.contact.contact_id;
 }
 
+// GST18 (18%) and the "Professional fees New tax" TDS rate (10%), confirmed
+// against this org's real Settings > Taxes / GST TDS records (tax_id values
+// are org-specific and only discoverable via GET /settings/taxes or an
+// existing estimate that already applies them — not derivable from the tax
+// name/percentage alone).
+const GST18_TAX_ID = "2273874000000030203";
+const PROFESSIONAL_FEES_TDS_TAX_ID = "2273874000000527020";
+
 interface ZohoEstimateCreateResponse {
   estimate: {
     estimate_id: string;
@@ -158,6 +166,8 @@ export async function createEstimate(
           name: firstLineItem.name,
           rate: firstLineItem.price,
           quantity: firstLineItem.quantity,
+          tax_id: GST18_TAX_ID,
+          tds_tax_id: PROFESSIONAL_FEES_TDS_TAX_ID,
         },
       ],
     }),
