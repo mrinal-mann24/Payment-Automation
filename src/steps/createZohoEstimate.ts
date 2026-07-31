@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
+import { fetchDealWithLineItemsAndContact, addLineItemToDeal, type HubspotLineItem } from "../clients/hubspot.js";
 import { createEstimate, findOrCreateCustomer } from "../clients/zoho.js";
 import {
   createRenewalJob,
@@ -7,6 +7,7 @@ import {
   markZohoStepDone,
   markZohoStepFailed,
 } from "../repositories/renewalJobs.js";
+import { findClientPricing, upsertClientPricing } from "../repositories/clientPricing.js";
 
 export interface CreateZohoEstimateResult {
   zohoEstimateId: string;
@@ -34,8 +35,42 @@ export async function createZohoEstimate(
   const job = existingJob ?? (await createRenewalJob(supabase, dealId, deal.billingPeriod));
 
   try {
+    // client_pricing is the source of truth for the renewal base price,
+    // once set — it takes over from HubSpot's line item price. No row yet
+    // (new/unmigrated deal) falls back to HubSpot's existing lineItems[0],
+    // unchanged from before. See ARCHITECTURE.md for why this doesn't
+    // create two permanently competing sources of truth: HubSpot is
+    // updated with a log line item after the estimate is created, so it
+    // always reflects what was billed. addition_price is deliberately NOT
+    // included here — additions are billed separately via their own
+    // one-off quote+link flow (src/steps/createAdditionCharge.ts), never
+    // folded into the renewal total.
+    const pricing = await findClientPricing(supabase, dealId);
+    let dealForEstimate = deal;
+    let billedLineItem: HubspotLineItem | null = null;
+
+    if (pricing) {
+      const firstLineItem = deal.lineItems[0];
+      billedLineItem = {
+        id: firstLineItem?.id ?? "",
+        name: firstLineItem?.name ?? deal.dealName,
+        quantity: firstLineItem?.quantity ?? 1,
+        price: pricing.base_price,
+      };
+      dealForEstimate = { ...deal, lineItems: [billedLineItem] };
+    }
+
     const customerId = await findOrCreateCustomer(deal.contactEmail, deal.contactName);
-    const { estimateId, estimateNumber, total } = await createEstimate(customerId, deal);
+    const { estimateId, estimateNumber, total } = await createEstimate(customerId, dealForEstimate);
+
+    if (billedLineItem) {
+      await addLineItemToDeal(dealId, {
+        name: billedLineItem.name,
+        quantity: billedLineItem.quantity,
+        price: billedLineItem.price,
+      });
+    }
+
     await markZohoStepDone(supabase, job.id, estimateId, estimateNumber, total);
     return {
       zohoEstimateId: estimateId,

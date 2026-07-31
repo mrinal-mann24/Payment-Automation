@@ -3,9 +3,12 @@ import { z } from "zod";
 import { getSupabaseClient } from "../clients/supabase.js";
 import { verifyWebhookSignature } from "../clients/razorpay.js";
 import { findRenewalJobByEstimateNumber } from "../repositories/renewalJobs.js";
+import { findAdditionChargeByEstimateNumber } from "../repositories/additionCharges.js";
 import { convertZohoInvoice } from "../steps/convertZohoInvoice.js";
 import { sendPaymentConfirmation } from "../steps/sendPaymentConfirmation.js";
 import { markRenewalDone } from "../steps/markRenewalDone.js";
+import { convertAdditionInvoice } from "../steps/convertAdditionInvoice.js";
+import { sendAdditionPaymentConfirmation } from "../steps/sendAdditionPaymentConfirmation.js";
 
 const paymentLinkPaidSchema = z.object({
   event: z.string(),
@@ -46,44 +49,67 @@ razorpayWebhookRouter.post(
     const supabase = getSupabaseClient();
 
     const job = await findRenewalJobByEstimateNumber(supabase, estimateNumber);
-    if (!job || job.razorpay_step_status !== "done") {
-      console.log(
-        `[razorpayWebhook] ignored: no matching renewal_job in "done" razorpay state for estimate ${estimateNumber}`,
-      );
-      res.status(200).json({ received: true, processed: false });
+    if (job && job.razorpay_step_status === "done") {
+      try {
+        console.log(`[razorpayWebhook] deal ${job.hubspot_deal_id} -> converting estimate to invoice`);
+        const { invoiceId, invoiceNumber } = await convertZohoInvoice(
+          supabase,
+          job.hubspot_deal_id,
+          job.billing_period,
+        );
+        console.log(
+          `[razorpayWebhook] deal ${job.hubspot_deal_id} -> invoice ${invoiceNumber} (${invoiceId})`,
+        );
+
+        const { sent, skipReason } = await sendPaymentConfirmation(
+          supabase,
+          job.hubspot_deal_id,
+          job.billing_period,
+        );
+        console.log(
+          sent
+            ? `[razorpayWebhook] deal ${job.hubspot_deal_id} -> payment-confirmation WhatsApp message sent`
+            : `[razorpayWebhook] deal ${job.hubspot_deal_id} -> payment-confirmation message skipped: ${skipReason}`,
+        );
+
+        await markRenewalDone(supabase, job.hubspot_deal_id, job.billing_period);
+        console.log(`[razorpayWebhook] deal ${job.hubspot_deal_id} -> HubSpot marked Renewal Done`);
+
+        res.status(200).json({ received: true, processed: true, periskopeSent: sent, periskopeSkipReason: skipReason });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[razorpayWebhook] deal ${job.hubspot_deal_id} failed: ${message}`);
+        res.status(502).json({ error: "Failed to run payment-confirmation pipeline", details: message });
+      }
       return;
     }
 
-    try {
-      console.log(`[razorpayWebhook] deal ${job.hubspot_deal_id} -> converting estimate to invoice`);
-      const { invoiceId, invoiceNumber } = await convertZohoInvoice(
-        supabase,
-        job.hubspot_deal_id,
-        job.billing_period,
-      );
-      console.log(
-        `[razorpayWebhook] deal ${job.hubspot_deal_id} -> invoice ${invoiceNumber} (${invoiceId})`,
-      );
+    const additionCharge = await findAdditionChargeByEstimateNumber(supabase, estimateNumber);
+    if (additionCharge && additionCharge.status === "done") {
+      try {
+        console.log(`[razorpayWebhook] addition charge ${estimateNumber} -> converting estimate to invoice`);
+        const { invoiceId, invoiceNumber } = await convertAdditionInvoice(supabase, estimateNumber);
+        console.log(`[razorpayWebhook] addition charge ${estimateNumber} -> invoice ${invoiceNumber} (${invoiceId})`);
 
-      const { sent, skipReason } = await sendPaymentConfirmation(
-        supabase,
-        job.hubspot_deal_id,
-        job.billing_period,
-      );
-      console.log(
-        sent
-          ? `[razorpayWebhook] deal ${job.hubspot_deal_id} -> payment-confirmation WhatsApp message sent`
-          : `[razorpayWebhook] deal ${job.hubspot_deal_id} -> payment-confirmation message skipped: ${skipReason}`,
-      );
+        const { sent, skipReason } = await sendAdditionPaymentConfirmation(supabase, estimateNumber);
+        console.log(
+          sent
+            ? `[razorpayWebhook] addition charge ${estimateNumber} -> payment-confirmation WhatsApp message sent`
+            : `[razorpayWebhook] addition charge ${estimateNumber} -> payment-confirmation message skipped: ${skipReason}`,
+        );
 
-      await markRenewalDone(supabase, job.hubspot_deal_id, job.billing_period);
-      console.log(`[razorpayWebhook] deal ${job.hubspot_deal_id} -> HubSpot marked Renewal Done`);
-
-      res.status(200).json({ received: true, processed: true, periskopeSent: sent, periskopeSkipReason: skipReason });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[razorpayWebhook] deal ${job.hubspot_deal_id} failed: ${message}`);
-      res.status(502).json({ error: "Failed to run payment-confirmation pipeline", details: message });
+        res.status(200).json({ received: true, processed: true, periskopeSent: sent, periskopeSkipReason: skipReason });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[razorpayWebhook] addition charge ${estimateNumber} failed: ${message}`);
+        res.status(502).json({ error: "Failed to run addition-charge payment-confirmation pipeline", details: message });
+      }
+      return;
     }
+
+    console.log(
+      `[razorpayWebhook] ignored: no matching renewal_job or addition_charge in "done" state for estimate ${estimateNumber}`,
+    );
+    res.status(200).json({ received: true, processed: false });
   },
 );

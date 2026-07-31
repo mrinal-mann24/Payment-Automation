@@ -11,7 +11,7 @@ app.listen(config.port, () => {
   console.log(`Renewal automation service listening on port ${config.port}`);
 });
 
-cron.schedule("0 9 * * *", async () => {
+cron.schedule("0 11 * * *", async () => {
   await runRenewalCheck().catch((err) => {
     console.error("[renewalCron] run failed:", err);
   });

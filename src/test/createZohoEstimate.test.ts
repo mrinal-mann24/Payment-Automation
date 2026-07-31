@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 vi.mock("../clients/hubspot.js", () => ({
   fetchDealWithLineItemsAndContact: vi.fn(),
+  addLineItemToDeal: vi.fn(),
 }));
 vi.mock("../clients/zoho.js", () => ({
   findOrCreateCustomer: vi.fn(),
@@ -14,8 +15,11 @@ vi.mock("../repositories/renewalJobs.js", () => ({
   markZohoStepDone: vi.fn(),
   markZohoStepFailed: vi.fn(),
 }));
+vi.mock("../repositories/clientPricing.js", () => ({
+  findClientPricing: vi.fn(),
+}));
 
-import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
+import { fetchDealWithLineItemsAndContact, addLineItemToDeal } from "../clients/hubspot.js";
 import { createEstimate, findOrCreateCustomer } from "../clients/zoho.js";
 import {
   createRenewalJob,
@@ -23,6 +27,7 @@ import {
   markZohoStepDone,
   markZohoStepFailed,
 } from "../repositories/renewalJobs.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { createZohoEstimate } from "../steps/createZohoEstimate.js";
 
 const fakeSupabase = {} as SupabaseClient;
@@ -40,6 +45,7 @@ const fakeDeal = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue(fakeDeal);
+  vi.mocked(findClientPricing).mockResolvedValue(null);
 });
 
 describe("createZohoEstimate", () => {

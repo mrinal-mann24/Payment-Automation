@@ -1,6 +1,6 @@
 # Progress tracker
 
-Last updated: 2026-07-23 (step 5 implemented, not yet live-tested)
+Last updated: 2026-07-31 (GST/TDS on estimates + `client_pricing` override, both live-verified; step 5 reminders disabled per instruction)
 
 ## How to use this file
 - Claude Code updates this after every change — don't let it go stale.
@@ -16,9 +16,27 @@ Last updated: 2026-07-23 (step 5 implemented, not yet live-tested)
 | 2 — Razorpay payment link | `context/features/step2.md` | Done | Fully verified end-to-end against real data: real test deal → real Zoho estimate (`QT-000416`) → real live-mode Razorpay payment link (`plink_TG6rOiKpZwe2xM`). Idempotency confirmed live (identical re-run reused both). |
 | 3 — Send quote + payment link via Periskope | `context/features/step3.md` | Done | Fully verified live end-to-end against the real test deal: real Zoho estimate PDF download → real Periskope WhatsApp send (confirmed `delivered` + received) → `renewal_jobs` marked done. No HubSpot write (see notes below — there's no real "Quote Sent" stage). Idempotent re-run confirmed. |
 | 4 — Razorpay webhook → Zoho invoice → WhatsApp confirmation | `context/features/step4.md` | Done | Live-verified end-to-end 2026-07-22: real Razorpay test-mode payment → signature-verified webhook → real Zoho invoice created (`INV-10589`) and read back correctly → Periskope WhatsApp message **with invoice PDF attached** → HubSpot deal moved to "Renewal Done". `renewal_jobs` row confirmed clean (`invoice_step_status: done`, `periskope_payment_confirmed_sent: true`, `hubspot_renewal_done: true`, `error_log: null`). |
-| 5 — Overdue payment reminders (WhatsApp, T+2/T+4/T+7) | `context/features/step5.md` | In progress | Implemented 2026-07-23: `runOverdueReminderCheck` (`src/jobs/reminderCron.ts`) runs right after `runRenewalCheck` in the same daily cron tick, querying `renewal_jobs` for `razorpay_step_status: done` + `invoice_step_status != done`, sending an escalating Periskope text reminder at exactly 2/4/7 days overdue (T+7 includes a discontinuation notice), idempotent per stage. Migration `0004_renewal_jobs_step5.sql` not yet applied live; message wording is placeholder, not yet business-confirmed; not yet live-tested — see notes below. |
+| 5 — Overdue payment reminders (WhatsApp, T+2/T+4/T+7) | `context/features/step5.md` | Disabled | Implemented 2026-07-23 (see below), but **`runOverdueReminderCheck` is commented out in `src/index.ts` as of 2026-07-31, per explicit instruction — no reminders currently send to anyone.** Code and migration untouched; re-enable by uncommenting the call in `src/index.ts`. |
+| 6 — GST + TDS on renewal estimates | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Live-verified: correct GST18 + TDS 10% math on two real estimates via the full webhook pipeline. |
+| 7 — Supabase `client_pricing` renewal-price override | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Renewal pipeline reads the override, live-verified; all 27 real VA-pipeline deals seeded from HubSpot. Editable via the admin interface (step 8). `addition_price` column present but unused as of the revision below step 6's row — see step 9. |
+| 8 — Pricing admin interface (`/admin/pricing`) | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Lists VA-pipeline deals, editable base price (saves to `client_pricing`), and an addition amount+description+Send control per deal. **No auth** — known, deferred gap. |
+| 9 — Addition charges (one-off quote/link/WhatsApp, separate from renewal) | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Own table (`addition_charges`), own quote+Razorpay link+WhatsApp send (with quote PDF), and own payment→invoice→WhatsApp-confirmation flow (with invoice PDF) mirroring the renewal pipeline's step 4 — both live-verified via a simulated signed Razorpay webhook. |
 
 ## Blocked / open questions
+- No auth on `/admin/pricing` or its two POST endpoints — anyone who
+  reaches the URL can view all client prices and trigger a real
+  charge/WhatsApp send. Deferred per explicit instruction; revisit before
+  deploying anywhere reachable outside a trusted network.
+- `client_pricing.addition_price` column exists but is unused by the
+  renewal pipeline (superseded by the separate `addition_charges` flow,
+  step 9) — harmless to leave as-is, but don't populate it expecting it
+  to do anything.
+- `ZOHO_REFRESH_TOKEN` was rotated 2026-07-31 to add `settings.READ`
+  scope, and was briefly visible in a chat transcript during the
+  exchange — flagged for a further rotation once things are confirmed
+  stable, same caution as the still-open 2026-07-22 exposure below.
+- Step 5 (overdue reminders) is fully implemented but **intentionally
+  disabled** (see Status table) — re-enable only on explicit instruction.
 - Step 5's migration (`0004_renewal_jobs_step5.sql`) has not been applied
   to the live Supabase project yet — apply before `runOverdueReminderCheck`
   is used for real.
@@ -73,6 +91,112 @@ Last updated: 2026-07-23 (step 5 implemented, not yet live-tested)
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-07-31 — Revised the `client_pricing` feature (same day as its
+  initial build, below) and added two new features on top of it, all per
+  explicit instruction during design review:
+  1. **Reverted addition-into-renewal billing.** The initial version
+     billed `base_price + addition_price` together on the renewal
+     estimate. Changed to bill `base_price` alone — additions are now a
+     fully separate flow (see #3 below), never folded into the renewal
+     total, to avoid a timing collision (an addition set after the day's
+     cron has already fired had no clean way to reach the client under
+     the old design). `client_pricing.addition_price` column left in
+     place but is now unused/always 0 for the renewal pipeline.
+  2. **Seeded `client_pricing` for all 27 real VA-pipeline deals**, pulled
+     live from HubSpot's deal Search API (pipeline `1534965463` +
+     `VA_ACTIVE_CUSTOMER_DEALSTAGES`, the same filter the live renewal
+     cron already uses) — `base_price` set to each deal's current
+     `lineItems[0].price`, `addition_price = 0`. One-off script, not
+     committed to the repo. The existing test deal (`337128679127`) was
+     excluded from the seed to avoid clobbering its in-progress test
+     values.
+  3. **Added `addition_charges`** (`supabase/migrations/0006_addition_charges.sql`,
+     `0007_addition_charges_invoice.sql`, both applied live) and
+     `src/steps/createAdditionCharge.ts` — a fully independent one-off
+     charge flow (own Zoho quote with GST18+TDS, own Razorpay link, own
+     WhatsApp send with the **quote PDF** attached — changed from an
+     initial text-only version, per explicit instruction that the PDF
+     itself should go out). Payment is handled by extending the existing
+     `src/routes/razorpayWebhook.ts` to also check `addition_charges`
+     (via `findAdditionChargeByEstimateNumber`) when an incoming
+     `payment_link.paid` event doesn't match a `renewal_jobs` row —
+     converts the addition's estimate to a real Zoho invoice
+     (`src/steps/convertAdditionInvoice.ts`, reuses the existing
+     `convertEstimateToInvoice`) and sends the **invoice** PDF as the
+     WhatsApp payment confirmation (`src/steps/sendAdditionPaymentConfirmation.ts`),
+     mirroring the renewal pipeline's step 4 exactly. No HubSpot write on
+     an addition's payment (nothing to move — no dealstage concept for a
+     one-off charge).
+  4. **Added the admin interface**: `GET /admin/pricing`
+     (`src/routes/pricingAdmin.ts` + `src/routes/pricingAdminPage.ts`,
+     HTML inlined as a template string rather than a static file, since
+     `tsc`'s build doesn't copy non-`.ts` files into `dist/`). Lists VA
+     deals (`fetchVaPipelineDeals`, new in `src/clients/hubspot.ts`) with
+     an editable base-price field (`POST /admin/pricing/base-price`) and
+     a per-deal amount+description+Send control
+     (`POST /admin/pricing/send-addition`). **No auth** — deferred per
+     explicit instruction; flagged as an open item.
+  **Live-verified end-to-end**, via the real HTTP endpoints (not calling
+  step functions directly): base-price save; an addition send (₹50 base
+  → estimate `QT-000447`, total ₹54, quote PDF confirmed sent); the
+  renewal pipeline re-run for the same deal immediately after, confirming
+  it billed ₹32.40 (₹30 base, completely unaffected by the addition sent
+  moments earlier — proving the two flows are truly independent); a
+  second addition send (₹60 → `QT-000449`, total ₹64.80) followed by a
+  manually HMAC-signed `payment_link.paid` webhook against the real
+  `/webhooks/razorpay` endpoint, confirming a real Zoho invoice
+  (`INV-10617`) was created and the invoice-PDF confirmation was sent.
+- 2026-07-31 — Added a `client_pricing` Supabase table
+  (`supabase/migrations/0005_client_pricing.sql`, applied live) that now
+  overrides HubSpot's line-item price for the renewal amount actually
+  billed. `client_pricing.hubspot_deal_id → base_price, addition_price`;
+  `src/steps/createZohoEstimate.ts` looks up this table before building
+  the estimate — if a row exists, `base_price + addition_price` is billed
+  instead of `deal.lineItems[0].price`; if no row exists (new/unmigrated
+  deal), falls back to the existing HubSpot line-item behavior unchanged.
+  After a successful estimate, the billed amount is written back to
+  HubSpot as a **new** line item via the existing `addLineItemToDeal`
+  (`src/clients/hubspot.ts`, reused from step 4) — this is a one-way log,
+  never read back for pricing, so HubSpot and Supabase can't drift
+  permanently out of sync the way two independent, mutually-read pricing
+  stores would. New repository file `src/repositories/clientPricing.ts`
+  (`findClientPricing`, read-only for now — no write path yet, since the
+  editing interface itself hasn't been built). Rationale for not making
+  Supabase and HubSpot two independently-trusted price sources: see the
+  design discussion in this session — HubSpot remains contractually the
+  "what did we actually charge" record via the log-back write, matching
+  `agent.md`'s existing rule to treat HubSpot as authoritative for
+  money-related data. **Live-verified end-to-end 2026-07-31**: seeded a
+  test row (`337128679127` → base 34000, addition 3000), ran
+  `POST /webhooks/renewal`, confirmed the resulting Zoho estimate
+  (`QT-000446`) billed the overridden amount (37000 pre-tax → GST18 +
+  TDS 10% → 39960 total, matching the manual math), and confirmed HubSpot
+  received a new line item priced at exactly 37000 (`hs_lastmodifieddate`
+  updated at the same moment). **Known gap, deliberate**: no write/edit
+  interface exists yet — the table can only be populated by direct SQL
+  today. **Also deliberate, per explicit instruction**: no reconciliation
+  logic between HubSpot's price and Supabase's price (no `==`/`!=`
+  comparison) — Supabase always wins once a row exists, full stop.
+- 2026-07-31 — Added GST (18%) and TDS (10%, "Professional fees New tax")
+  to every Zoho renewal estimate. `src/clients/zoho.ts::createEstimate`
+  now sends `tax_id` (GST18, `2273874000000030203`) and `tds_tax_id`
+  (`2273874000000527020`) on the line item — both org-specific IDs,
+  confirmed live against this Zoho org (no generic lookup endpoint exists
+  for TDS rates; found by re-authorizing the refresh token with the added
+  `ZohoBooks.settings.READ` scope, then scanning existing estimates for
+  one with `line_item_tds` already populated — `QT-000369`, "TWELVE FOUR
+  VENTURES"). Zoho computes CGST+SGST (intra-state) or IGST (inter-state)
+  automatically from the one `GST18` tax group, and nets out TDS in its
+  own `total` field — confirmed live (₹40,000 base → ₹43,200 total; later
+  ₹30 base → ₹32.40 total via the real webhook). No change needed in
+  `src/steps/createRazorpayLink.ts` — it already charges
+  `zoho_estimate_total` verbatim, and Razorpay itself never adds tax on
+  top of the `amount` field sent to it (confirmed via a real test-mode
+  payment link: sent 43200, payment page showed exactly INR 43,200.00).
+  Rotated `ZOHO_REFRESH_TOKEN` as part of the scope change; flagged for a
+  further rotation since it was briefly visible in a chat transcript
+  during the exchange (same caution as the 2026-07-22 token exposure
+  below).
 - 2026-07-23 — Fixed a pre-existing bug surfaced by the first VPS Docker
   build: all 11 files under `src/test/*.test.ts` imported the module under
   test via a same-directory relative path (e.g.

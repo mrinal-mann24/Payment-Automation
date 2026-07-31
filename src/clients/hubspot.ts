@@ -156,6 +156,46 @@ export async function fetchDealStage(dealId: string): Promise<string> {
   return deal.properties.dealstage ?? "";
 }
 
+// The real Virtual Accounting pipeline ID — same constant as
+// src/clients/neon.ts::VA_PIPELINE_ID, duplicated here since that one is
+// scoped to filtering Neon's line_items table, not HubSpot deal search.
+const VA_PIPELINE_ID = "1534965463";
+
+export interface VaPipelineDeal {
+  dealId: string;
+  dealName: string;
+  dealStage: string;
+}
+
+// Used by the pricing admin interface to list deals to price/charge —
+// same pipeline + active-customer-stage filter as
+// VA_ACTIVE_CUSTOMER_DEALSTAGES, applied directly via HubSpot's deal
+// search API rather than Neon (this only needs a list of deals, not a
+// due-today trigger).
+export async function fetchVaPipelineDeals(): Promise<VaPipelineDeal[]> {
+  const result = (await hubspotFetch("/crm/v3/objects/deals/search", {
+    method: "POST",
+    body: JSON.stringify({
+      filterGroups: [
+        {
+          filters: [
+            { propertyName: "pipeline", operator: "EQ", value: VA_PIPELINE_ID },
+            { propertyName: "dealstage", operator: "IN", values: VA_ACTIVE_CUSTOMER_DEALSTAGES },
+          ],
+        },
+      ],
+      properties: ["dealname", "dealstage"],
+      limit: 100,
+    }),
+  })) as { results: Array<{ id: string; properties: { dealname?: string; dealstage?: string } }> };
+
+  return result.results.map((deal) => ({
+    dealId: deal.id,
+    dealName: deal.properties.dealname ?? "",
+    dealStage: deal.properties.dealstage ?? "",
+  }));
+}
+
 // HubSpot's default association type ID for "line item to deal".
 const LINE_ITEM_TO_DEAL_ASSOCIATION_TYPE_ID = 20;
 

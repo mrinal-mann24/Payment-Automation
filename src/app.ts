@@ -1,6 +1,7 @@
 import express, { type Request } from "express";
 import { renewalWebhookRouter } from "./routes/renewalWebhook.js";
 import { razorpayWebhookRouter } from "./routes/razorpayWebhook.js";
+import { pricingAdminRouter } from "./routes/pricingAdmin.js";
 
 export function createApp() {
   const app = express();
@@ -13,5 +14,6 @@ export function createApp() {
   );
   app.use(renewalWebhookRouter);
   app.use(razorpayWebhookRouter);
+  app.use(pricingAdminRouter);
   return app;
 }
