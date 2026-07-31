@@ -41,10 +41,10 @@ export async function createZohoEstimate(
     // unchanged from before. See ARCHITECTURE.md for why this doesn't
     // create two permanently competing sources of truth: HubSpot is
     // updated with a log line item after the estimate is created, so it
-    // always reflects what was billed. addition_price is deliberately NOT
-    // included here — additions are billed separately via their own
-    // one-off quote+link flow (src/steps/createAdditionCharge.ts), never
-    // folded into the renewal total.
+    // always reflects what was billed. One-off additions are billed
+    // separately via their own quote+link flow
+    // (src/steps/createAdditionCharge.ts), never folded into the renewal
+    // total.
     const pricing = await findClientPricing(supabase, dealId);
     let dealForEstimate = deal;
     let billedLineItem: HubspotLineItem | null = null;

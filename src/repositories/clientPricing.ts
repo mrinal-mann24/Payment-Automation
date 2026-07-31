@@ -3,8 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export interface ClientPricing {
   id: string;
   hubspot_deal_id: string;
+  deal_name: string | null;
   base_price: number;
-  addition_price: number;
   created_at: string;
   updated_at: string;
 }
@@ -30,11 +30,17 @@ export async function upsertClientPricing(
   supabase: SupabaseClient,
   dealId: string,
   basePrice: number,
+  dealName?: string,
 ): Promise<void> {
   const { error } = await supabase
     .from("client_pricing")
     .upsert(
-      { hubspot_deal_id: dealId, base_price: basePrice, updated_at: new Date().toISOString() },
+      {
+        hubspot_deal_id: dealId,
+        base_price: basePrice,
+        ...(dealName ? { deal_name: dealName } : {}),
+        updated_at: new Date().toISOString(),
+      },
       { onConflict: "hubspot_deal_id" },
     );
 

@@ -80,7 +80,7 @@ async function loadDeals() {
         const res = await fetch('/admin/pricing/base-price', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dealId: deal.dealId, basePrice }),
+          body: JSON.stringify({ dealId: deal.dealId, basePrice, dealName: deal.dealName }),
         });
         if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
         saveStatus.textContent = 'Saved';

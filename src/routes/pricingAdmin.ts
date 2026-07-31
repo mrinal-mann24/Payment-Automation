@@ -27,7 +27,6 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
         dealName: deal.dealName,
         dealStage: deal.dealStage,
         basePrice: pricing?.base_price ?? null,
-        additionPrice: pricing?.addition_price ?? null,
       };
     });
 
@@ -41,6 +40,7 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
 const savePricingSchema = z.object({
   dealId: z.string().min(1),
   basePrice: z.number().nonnegative(),
+  dealName: z.string().optional(),
 });
 
 pricingAdminRouter.post("/admin/pricing/base-price", async (req: Request, res: Response) => {
@@ -52,7 +52,7 @@ pricingAdminRouter.post("/admin/pricing/base-price", async (req: Request, res: R
 
   try {
     const supabase = getSupabaseClient();
-    await upsertClientPricing(supabase, parsed.data.dealId, parsed.data.basePrice);
+    await upsertClientPricing(supabase, parsed.data.dealId, parsed.data.basePrice, parsed.data.dealName);
     res.status(200).json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

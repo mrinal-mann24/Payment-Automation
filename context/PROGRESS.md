@@ -18,7 +18,7 @@ Last updated: 2026-07-31 (GST/TDS on estimates + `client_pricing` override, both
 | 4 — Razorpay webhook → Zoho invoice → WhatsApp confirmation | `context/features/step4.md` | Done | Live-verified end-to-end 2026-07-22: real Razorpay test-mode payment → signature-verified webhook → real Zoho invoice created (`INV-10589`) and read back correctly → Periskope WhatsApp message **with invoice PDF attached** → HubSpot deal moved to "Renewal Done". `renewal_jobs` row confirmed clean (`invoice_step_status: done`, `periskope_payment_confirmed_sent: true`, `hubspot_renewal_done: true`, `error_log: null`). |
 | 5 — Overdue payment reminders (WhatsApp, T+2/T+4/T+7) | `context/features/step5.md` | Disabled | Implemented 2026-07-23 (see below), but **`runOverdueReminderCheck` is commented out in `src/index.ts` as of 2026-07-31, per explicit instruction — no reminders currently send to anyone.** Code and migration untouched; re-enable by uncommenting the call in `src/index.ts`. |
 | 6 — GST + TDS on renewal estimates | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Live-verified: correct GST18 + TDS 10% math on two real estimates via the full webhook pipeline. |
-| 7 — Supabase `client_pricing` renewal-price override | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Renewal pipeline reads the override, live-verified; all 27 real VA-pipeline deals seeded from HubSpot. Editable via the admin interface (step 8). `addition_price` column present but unused as of the revision below step 6's row — see step 9. |
+| 7 — Supabase `client_pricing` renewal-price override | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Renewal pipeline reads the override, live-verified; all 27 real VA-pipeline deals seeded from HubSpot. Editable via the admin interface (step 8). `addition_price` column was added, found unused after the addition-charges revision (step 9), and **dropped** same day (`0008_drop_client_pricing_addition_price.sql`). |
 | 8 — Pricing admin interface (`/admin/pricing`) | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Lists VA-pipeline deals, editable base price (saves to `client_pricing`), and an addition amount+description+Send control per deal. **No auth** — known, deferred gap. |
 | 9 — Addition charges (one-off quote/link/WhatsApp, separate from renewal) | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Own table (`addition_charges`), own quote+Razorpay link+WhatsApp send (with quote PDF), and own payment→invoice→WhatsApp-confirmation flow (with invoice PDF) mirroring the renewal pipeline's step 4 — both live-verified via a simulated signed Razorpay webhook. |
 
@@ -27,10 +27,11 @@ Last updated: 2026-07-31 (GST/TDS on estimates + `client_pricing` override, both
   reaches the URL can view all client prices and trigger a real
   charge/WhatsApp send. Deferred per explicit instruction; revisit before
   deploying anywhere reachable outside a trusted network.
-- `client_pricing.addition_price` column exists but is unused by the
-  renewal pipeline (superseded by the separate `addition_charges` flow,
-  step 9) — harmless to leave as-is, but don't populate it expecting it
-  to do anything.
+- ~~`client_pricing.addition_price` column exists but is unused...~~ —
+  **resolved 2026-07-31.** Column dropped entirely
+  (`0008_drop_client_pricing_addition_price.sql`) rather than left as
+  dead weight, once confirmed permanent (superseded by the separate
+  `addition_charges` flow, step 9).
 - `ZOHO_REFRESH_TOKEN` was rotated 2026-07-31 to add `settings.READ`
   scope, and was briefly visible in a chat transcript during the
   exchange — flagged for a further rotation once things are confirmed
@@ -91,6 +92,31 @@ Last updated: 2026-07-31 (GST/TDS on estimates + `client_pricing` override, both
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-07-31 — Added `client_pricing.deal_name`
+  (`supabase/migrations/0009_client_pricing_deal_name.sql`, applied
+  live) — a denormalized, non-authoritative copy of the HubSpot deal
+  name, purely so a direct query against `client_pricing` is
+  self-describing without joining HubSpot. `upsertClientPricing` now
+  takes an optional `dealName` param;
+  `POST /admin/pricing/base-price` accepts an optional `dealName` field
+  and the admin page's frontend now sends `deal.dealName` (already known
+  from the deals list) on every save. **Backfilled all 27 existing
+  rows** via 27 real calls to the same `POST /admin/pricing/base-price`
+  endpoint (not a direct SQL write) — each preserving its existing
+  `base_price` unchanged and adding the deal's current HubSpot name,
+  pulled fresh via the Search API. Typecheck and `npm test` (52/52) both
+  pass; live-verified via `execute_sql` that all 27 rows show the
+  correct name and an unchanged price.
+- 2026-07-31 — Dropped `client_pricing.addition_price`
+  (`supabase/migrations/0008_drop_client_pricing_addition_price.sql`,
+  applied live) — confirmed genuinely unused (grepped the codebase: only
+  referenced in a stale comment and passed through, unused, by the admin
+  API response) after the addition-charges revision made it permanently
+  dead rather than temporarily unused. Removed from
+  `src/repositories/clientPricing.ts`'s `ClientPricing` type and
+  `src/routes/pricingAdmin.ts`'s deals-list response; cleaned up the
+  stale comment in `src/steps/createZohoEstimate.ts`. Typecheck and
+  `npm test` (52/52) both pass.
 - 2026-07-31 — Revised the `client_pricing` feature (same day as its
   initial build, below) and added two new features on top of it, all per
   explicit instruction during design review:

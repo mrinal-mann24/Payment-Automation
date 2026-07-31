@@ -386,15 +386,29 @@ step 4's Done status).
 
 ### 3.7b Supabase — `client_pricing` (renewal price override, added 2026-07-31)
 Table: `client_pricing` (`supabase/migrations/0005_client_pricing.sql`,
-applied live)
+applied live; `addition_price` column later **dropped** —
+`supabase/migrations/0008_drop_client_pricing_addition_price.sql`,
+applied live, same day — once it became clear it was permanently unused
+after the addition-charges revision below made it dead weight rather
+than a temporarily-unused field; `deal_name` column **added** —
+`supabase/migrations/0009_client_pricing_deal_name.sql`, applied live,
+same day)
 
 | column | type | notes |
 |---|---|---|
 | id | uuid | pk |
 | hubspot_deal_id | text | unique — one row per deal, not per billing period |
+| deal_name | text \| null | denormalized copy of the HubSpot deal name at save time, purely for readability when querying `client_pricing` directly — not authoritative (HubSpot's `dealname` property is); populated by the admin interface's Save action (`POST /admin/pricing/base-price`, `dealName` is optional in the request), not auto-kept-in-sync if the deal is later renamed in HubSpot |
 | base_price | numeric | the renewal price to bill, replacing HubSpot's `lineItems[0].price` when a row exists |
-| addition_price | numeric | default 0; **unused by the renewal pipeline as of 2026-07-31** — see the addition-charges revision below. Column kept in the schema but always 0 for renewals; not read by `createZohoEstimate`. |
 | created_at / updated_at | timestamptz | |
+
+**Backfilled 2026-07-31**: all 27 existing rows (seeded before this
+column existed, so all had `deal_name = null`) were backfilled via 27
+real `POST /admin/pricing/base-price` calls (not a direct SQL update),
+each preserving the row's existing `base_price` exactly and adding the
+current HubSpot `dealname` — exercising the real save endpoint rather
+than writing to the table directly, so the backfill is provably
+equivalent to what the admin interface itself would produce.
 
 **Why this exists**: `deal.lineItems[0]` (§6, "Known risk, accepted
 deliberately") is not a reliable way to identify or price a renewal —
