@@ -29,6 +29,11 @@ export const config = {
       return requireEnv("HUBSPOT_PRIVATE_APP_TOKEN");
     },
   },
+  renewalWebhook: {
+    get sharedSecret() {
+      return requireEnv("RENEWAL_WEBHOOK_SECRET");
+    },
+  },
   razorpay: {
     get keyId() {
       return requireEnv("RAZORPAY_KEY_ID");

@@ -1,6 +1,6 @@
 # Architecture — renewal billing automation
 
-Last updated: 2026-07-31 (GST/TDS on estimates + `client_pricing` override, both live-verified; step 5 reminders disabled per instruction)
+Last updated: 2026-09-15 (bug-fix pass: concurrency guards for Zoho estimate/invoice creation, addition-charges duplicate-submit guard, `/webhooks/renewal` auth + active-customer gate, HubSpot price/quantity validation, Zoho token-refresh de-dup, cron schedule corrected to 11:00 IST to match deployed code)
 
 ## 1. Problem this replaces
 Today an accountant creates the Razorpay link, creates the Zoho quote,
@@ -16,7 +16,7 @@ the original "invoice creation is out of scope" decision).
 
 ## 2. High-level flow
 ```
-Daily cron (this backend, in-process, node-cron @ 09:00 IST)
+Daily cron (this backend, in-process, node-cron @ 11:00 IST)
   -> query Neon (Live_HS_Updates) for VA renewal line items due today
        -> for each due deal_id:
             -> Step 1: re-fetch deal from HubSpot API, create Zoho Books
@@ -31,7 +31,7 @@ client actually pays — independent of the daily cron)
              real invoice, send WhatsApp payment confirmation via
              Periskope, update HubSpot deal/line items ("Paid")
 
-Daily cron (same 09:00 IST tick, runs right after the above — step 5,
+Daily cron (same 11:00 IST tick, runs right after the above — step 5,
   currently disabled, see §3.7a)
   -> for each renewal_job with a payment link sent but not yet paid,
      at 2/4/7 days past due: send an escalating WhatsApp reminder via
@@ -61,9 +61,8 @@ could be minutes or weeks after step 3.
 - The Virtual Accounting pipeline ID, confirmed against real row data
   (every deal/line-item name under it says "VA"), is **`1534965463`**. Do
   not confuse with `106069137`, which is the AIA pipeline.
-- This backend runs a **daily cron (`node-cron`, 09:00 `Asia/Kolkata`
-  — changed from 06:00 on 2026-07-31, per explicit instruction,
-  in-process — no separate service)** that queries `line_items` for rows
+- This backend runs a **daily cron (`node-cron`, 11:00 `Asia/Kolkata`
+  — changed from 06:00, in-process — no separate service)** that queries `line_items` for rows
   where `pipeline = '1534965463' AND deleted IS NULL AND due_on =
   CURRENT_DATE`, grouped by `record_id`. See `src/clients/neon.ts` and
   `src/jobs/renewalCron.ts`. **Changed 2026-07-22**: no longer filters on
@@ -208,6 +207,15 @@ could be minutes or weeks after step 3.
   contradiction until you trace it to that one specific later call.
 - Line items can be custom (name/rate/quantity) without a pre-registered
   item_id, or mapped to catalog items — decision in §6
+- **Hardened in a bug-fix pass**: `getAccessToken` (token refresh) now
+  de-dupes concurrent cache-miss calls into a single in-flight refresh
+  request instead of each caller firing its own request at Zoho's OAuth
+  endpoint. OAuth params (`client_secret`, `refresh_token`, etc.) are now
+  sent as a POST body instead of URL query-string params, since query
+  strings are more likely to end up in proxy/access logs. `createEstimate`
+  now validates the response has the expected `estimate_id`/
+  `estimate_number`/`total` fields before returning, instead of letting a
+  malformed response surface later as an opaque `undefined` crash.
 
 ### 3.4 Razorpay
 - Auth: API key + secret, server-side only (no OAuth)
@@ -259,6 +267,16 @@ could be minutes or weeks after step 3.
     request shape minus `media`) went unused in production for a while
     after that, but **step 5 (2026-07-23) now uses it** for the three
     overdue-payment reminder messages (text-only, no PDF attachment).
+- **Hardened in a bug-fix pass**: `toChatId` previously derived a
+  WhatsApp chat ID from any string with no validation — a malformed
+  HubSpot `phone` value (wrong digit count, an extension note, etc.)
+  could silently resolve to some other real WhatsApp number rather than
+  failing. `isValidWhatsappPhone` now requires a bare 10-digit Indian
+  number or a 12-digit one already carrying the `91` country code;
+  every step that sends via Periskope (steps 3, 4, 5, and addition
+  charges) now treats an invalid phone the same as a missing one —
+  skips gracefully and records the reason, rather than sending to the
+  wrong number or crashing the job.
 
 ### 3.6 HubSpot (write-back)
 - **Changed 2026-07-21 (implementation).** Step 3 makes **no HubSpot
@@ -314,9 +332,8 @@ could be minutes or weeks after step 3.
   `runOverdueReminderCheck()` call in `src/index.ts` is commented out —
   no reminders currently send to anyone. Everything below describes the
   implementation as built; re-enable by uncommenting that one call.
-- Trigger (when enabled): same daily `node-cron` tick (now 09:00
-  `Asia/Kolkata`, changed from 06:00 — see the cron-schedule change,
-  2026-07-31) as the renewal cron, **not** a second `cron.schedule(...)`
+- Trigger (when enabled): same daily `node-cron` tick (now 11:00
+  `Asia/Kolkata`, changed from 06:00) as the renewal cron, **not** a second `cron.schedule(...)`
   registration — `src/index.ts` calls `runRenewalCheck()` then
   `runOverdueReminderCheck()` sequentially, each independently
   `try/catch`-wrapped so one failing does not block the other. See
@@ -627,6 +644,52 @@ source of truth later — they already carry real production data.
   partial failure still completes whichever of those two hadn't
   succeeded yet, without re-running the ones that had — see `step4.md`
   REQ-4.5.
+- **Hardened for concurrency, added in a bug-fix pass**: the checks above
+  are correct against *sequential* retries but originally had a
+  check-then-act gap against two *concurrent* deliveries (e.g. two
+  `payment_link.paid` webhooks arriving within the same request-handling
+  window) — both could read `invoice_step_status !== "done"` before
+  either had written back, and both would call Zoho's non-idempotent
+  `/invoices/fromestimates`. Fixed with an atomic DB-level claim:
+  `claimInvoiceStep` (`src/repositories/renewalJobs.ts`) flips
+  `invoice_step_status` from `"pending"` to a new transient
+  `"converting"` value via an `UPDATE ... WHERE invoice_step_status =
+  'pending'`, so only one concurrent caller's update actually matches and
+  proceeds to call Zoho; the loser polls (`waitForInvoiceStepDone` in
+  `src/steps/convertZohoInvoice.ts`) for the winner's result instead of
+  also converting. The same pattern (`claimZohoStep`, transient
+  `"creating"` status) now guards Zoho estimate creation in step 1 —
+  if a previous run crashed between creating the estimate and recording
+  it (Zoho's `/estimates` has no client-side idempotency key), the job is
+  left in `"creating"` rather than back at `"pending"`, and a resume now
+  throws a clear error naming the `reference_number` to check in Zoho
+  instead of silently creating a second real estimate.
+- **`addition_charges` has no unique constraint** (unlike `renewal_jobs`
+  and `client_pricing`), so a double-submit of the pricing admin's "Send"
+  button had no protection at all. `findRecentDuplicateAdditionCharge`
+  (`src/repositories/additionCharges.ts`) now checks for an identical
+  deal+amount+description charge created in the last 5 minutes that
+  hasn't failed, and `createAdditionCharge` returns that existing result
+  instead of creating a second Zoho estimate/Razorpay link/WhatsApp send.
+  This is an application-level window, not a DB constraint — acceptable
+  given the admin UI has no concurrent-user scenario today, but revisit
+  if that changes.
+- **`POST /webhooks/renewal` had no auth and bypassed the
+  active-customer dealstage gate** (that gate was cron-only, by design —
+  the route stayed open for manual testing of any `deal_id`). Anyone who
+  could reach the route could trigger a real Zoho estimate + Razorpay
+  link + WhatsApp send for any deal. Fixed: the route now requires an
+  `x-webhook-secret` header matching `RENEWAL_WEBHOOK_SECRET` (checked
+  with `timingSafeEqual`), and re-applies the same
+  `VA_ACTIVE_CUSTOMER_DEALSTAGES` gate the cron uses before running the
+  pipeline. **This changes how the route is manually tested** — callers
+  now need the shared secret header.
+- **HubSpot line-item `price`/`quantity` were coerced with a bare
+  `Number(...)`**, so a blank or malformed value from HubSpot silently
+  became `0`/`1` instead of failing — capable of producing a real ₹0
+  Zoho estimate. `fetchDealWithLineItemsAndContact`
+  (`src/clients/hubspot.ts`) now rejects any non-finite or negative
+  `price`/`quantity` with a clear error instead.
 
 ## 5. Credentials (env vars — never commit)
 - `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, `ZOHO_ORG_ID`
@@ -636,6 +699,10 @@ source of truth later — they already carry real production data.
   dashboard, used to verify `X-Razorpay-Signature` on inbound
   `POST /webhooks/razorpay` calls. Separate from `RAZORPAY_KEY_SECRET`.
 - `HUBSPOT_PRIVATE_APP_TOKEN`
+- `RENEWAL_WEBHOOK_SECRET` — new; shared secret required in the
+  `x-webhook-secret` header on `POST /webhooks/renewal`, checked with
+  `timingSafeEqual`. Not a webhook-provider-issued secret (this route has
+  no external provider) — generate any long random value.
 - `PERISKOPE_BEARER_TOKEN`, `PERISKOPE_X_PHONE`
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 - `NEON_DATABASE_URL` — connection string for the shared `Live_HS_Updates`

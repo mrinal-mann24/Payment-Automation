@@ -5,6 +5,7 @@ vi.mock("../clients/zoho.js", () => ({
   convertEstimateToInvoice: vi.fn(),
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
+  claimInvoiceStep: vi.fn(),
   findRenewalJob: vi.fn(),
   markInvoiceStepDone: vi.fn(),
   markInvoiceStepFailed: vi.fn(),
@@ -12,6 +13,7 @@ vi.mock("../repositories/renewalJobs.js", () => ({
 
 import { convertEstimateToInvoice } from "../clients/zoho.js";
 import {
+  claimInvoiceStep,
   findRenewalJob,
   markInvoiceStepDone,
   markInvoiceStepFailed,
@@ -51,6 +53,7 @@ const baseJob = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(claimInvoiceStep).mockResolvedValue(true);
 });
 
 describe("convertZohoInvoice", () => {

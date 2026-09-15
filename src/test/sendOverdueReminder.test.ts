@@ -6,6 +6,7 @@ vi.mock("../clients/hubspot.js", () => ({
 }));
 vi.mock("../clients/periskope.js", () => ({
   sendTextMessage: vi.fn(),
+  isValidWhatsappPhone: vi.fn(),
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
   findRenewalJob: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock("../repositories/renewalJobs.js", () => ({
 }));
 
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
-import { sendTextMessage } from "../clients/periskope.js";
+import { isValidWhatsappPhone, sendTextMessage } from "../clients/periskope.js";
 import { findRenewalJob, markReminderSent, markReminderSkipped } from "../repositories/renewalJobs.js";
 import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
 
@@ -61,6 +62,7 @@ const fakeDeal = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isValidWhatsappPhone).mockReturnValue(true);
 });
 
 describe("sendOverdueReminder", () => {

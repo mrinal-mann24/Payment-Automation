@@ -5,44 +5,64 @@ const ZOHO_ACCOUNTS_URL = "https://accounts.zoho.in/oauth/v2/token";
 const ZOHO_BOOKS_URL = "https://www.zohoapis.in/books/v3";
 
 let cachedToken: { accessToken: string; expiresAt: number } | null = null;
+let refreshInFlight: Promise<string> | null = null;
 
 async function getAccessToken(): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now()) {
     return cachedToken.accessToken;
   }
 
-  const params = new URLSearchParams({
-    refresh_token: config.zoho.refreshToken,
-    client_id: config.zoho.clientId,
-    client_secret: config.zoho.clientSecret,
-    grant_type: "refresh_token",
-  });
-
-  const response = await fetch(`${ZOHO_ACCOUNTS_URL}?${params.toString()}`, {
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Zoho OAuth token refresh failed ${response.status}: ${body}`);
+  // De-dupe concurrent cache misses (e.g. several pipeline steps racing
+  // right after the cached token expires) into a single refresh call
+  // instead of each firing its own request at Zoho's OAuth endpoint.
+  if (refreshInFlight) {
+    return refreshInFlight;
   }
 
-  const data = (await response.json()) as {
-    access_token?: string;
-    expires_in?: number;
-    error?: string;
-  };
+  refreshInFlight = (async () => {
+    try {
+      const params = new URLSearchParams({
+        refresh_token: config.zoho.refreshToken,
+        client_id: config.zoho.clientId,
+        client_secret: config.zoho.clientSecret,
+        grant_type: "refresh_token",
+      });
 
-  if (!data.access_token) {
-    throw new Error(`Zoho OAuth token refresh failed: ${data.error ?? "no access_token in response"}`);
-  }
+      // Sent as a POST body, not query-string params — query strings are
+      // more likely to end up in proxy/access logs than a request body.
+      const response = await fetch(ZOHO_ACCOUNTS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
 
-  cachedToken = {
-    accessToken: data.access_token,
-    expiresAt: Date.now() + ((data.expires_in ?? 3600) - 60) * 1000,
-  };
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Zoho OAuth token refresh failed ${response.status}: ${body}`);
+      }
 
-  return cachedToken.accessToken;
+      const data = (await response.json()) as {
+        access_token?: string;
+        expires_in?: number;
+        error?: string;
+      };
+
+      if (!data.access_token) {
+        throw new Error(`Zoho OAuth token refresh failed: ${data.error ?? "no access_token in response"}`);
+      }
+
+      cachedToken = {
+        accessToken: data.access_token,
+        expiresAt: Date.now() + ((data.expires_in ?? 3600) - 60) * 1000,
+      };
+
+      return cachedToken.accessToken;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
 }
 
 async function zohoFetch(path: string, init?: RequestInit): Promise<unknown> {
@@ -172,6 +192,20 @@ export async function createEstimate(
       ],
     }),
   })) as ZohoEstimateCreateResponse;
+
+  // Zoho can return HTTP 200 with a body that doesn't match the expected
+  // shape (e.g. a validation message under a different key) — fail loudly
+  // here rather than letting `undefined` fields silently reach the
+  // Razorpay amount calculation or renewal_jobs write.
+  if (
+    !result.estimate?.estimate_id ||
+    !result.estimate?.estimate_number ||
+    typeof result.estimate?.total !== "number"
+  ) {
+    throw new Error(
+      `Zoho /estimates response for deal ${deal.dealId} is missing expected fields: ${JSON.stringify(result)}`,
+    );
+  }
 
   return {
     estimateId: result.estimate.estimate_id,

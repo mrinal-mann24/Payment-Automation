@@ -10,6 +10,7 @@ vi.mock("../clients/zoho.js", () => ({
   createEstimate: vi.fn(),
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
+  claimZohoStep: vi.fn(),
   findRenewalJob: vi.fn(),
   createRenewalJob: vi.fn(),
   markZohoStepDone: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("../repositories/clientPricing.js", () => ({
 import { fetchDealWithLineItemsAndContact, addLineItemToDeal } from "../clients/hubspot.js";
 import { createEstimate, findOrCreateCustomer } from "../clients/zoho.js";
 import {
+  claimZohoStep,
   createRenewalJob,
   findRenewalJob,
   markZohoStepDone,
@@ -46,6 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue(fakeDeal);
   vi.mocked(findClientPricing).mockResolvedValue(null);
+  vi.mocked(claimZohoStep).mockResolvedValue(true);
 });
 
 describe("createZohoEstimate", () => {

@@ -2,7 +2,19 @@ import { config } from "../config.js";
 
 const PERISKOPE_BASE_URL = "https://api.periskope.app/v1";
 
+// A malformed HubSpot phone value (extension notes, wrong digit count,
+// etc.) must not silently resolve to some other real WhatsApp number —
+// only a bare 10-digit Indian local number or a 12-digit one already
+// carrying the 91 country code is accepted.
+export function isValidWhatsappPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length === 10 || (digits.length === 12 && digits.startsWith("91"));
+}
+
 function toChatId(phone: string): string {
+  if (!isValidWhatsappPhone(phone)) {
+    throw new Error(`Not a valid WhatsApp phone number: ${phone}`);
+  }
   const digits = phone.replace(/\D/g, "");
   // Bare 10-digit numbers are Indian local numbers with no country code
   // (e.g. HubSpot's `phone` property) — prepend 91 so the WhatsApp JID

@@ -37,6 +37,40 @@ export async function findAdditionChargeByEstimateNumber(
   return data as AdditionCharge | null;
 }
 
+// Guards against a double-submit of the pricing admin's "Send" button (no
+// server-side uniqueness exists on this table, unlike renewal_jobs/
+// client_pricing) — treats an identical deal+amount+description charge
+// created in the last few minutes and not yet failed as the same request,
+// rather than creating a second Zoho estimate/Razorpay link/WhatsApp send.
+const DUPLICATE_SUBMIT_WINDOW_MS = 5 * 60 * 1000;
+
+export async function findRecentDuplicateAdditionCharge(
+  supabase: SupabaseClient,
+  dealId: string,
+  amount: number,
+  description: string,
+): Promise<AdditionCharge | null> {
+  const since = new Date(Date.now() - DUPLICATE_SUBMIT_WINDOW_MS).toISOString();
+
+  const { data, error } = await supabase
+    .from("addition_charges")
+    .select("*")
+    .eq("hubspot_deal_id", dealId)
+    .eq("amount", amount)
+    .eq("description", description)
+    .neq("status", "failed")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to look up recent addition_charges duplicates: ${error.message}`);
+  }
+
+  return data as AdditionCharge | null;
+}
+
 export async function createAdditionChargeRow(
   supabase: SupabaseClient,
   dealId: string,

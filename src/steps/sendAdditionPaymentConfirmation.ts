@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { getInvoicePdf } from "../clients/zoho.js";
-import { sendDocumentMessage } from "../clients/periskope.js";
+import { isValidWhatsappPhone, sendDocumentMessage } from "../clients/periskope.js";
 import {
   findAdditionChargeByEstimateNumber,
   markAdditionPaymentConfirmedSent,
@@ -36,8 +36,11 @@ export async function sendAdditionPaymentConfirmation(
 
   const deal = await fetchDealWithLineItemsAndContact(charge.hubspot_deal_id);
 
-  if (!deal.contactPhone) {
-    return { sent: false, skipReason: `No WhatsApp identifier (contact phone) found for deal ${charge.hubspot_deal_id}` };
+  if (!deal.contactPhone || !isValidWhatsappPhone(deal.contactPhone)) {
+    const reason = deal.contactPhone
+      ? `Contact phone for deal ${charge.hubspot_deal_id} is not a valid WhatsApp number: ${deal.contactPhone}`
+      : `No WhatsApp identifier (contact phone) found for deal ${charge.hubspot_deal_id}`;
+    return { sent: false, skipReason: reason };
   }
 
   const pdf = await getInvoicePdf(charge.zoho_invoice_id);

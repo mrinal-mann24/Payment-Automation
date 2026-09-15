@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
-import { sendTextMessage } from "../clients/periskope.js";
+import { isValidWhatsappPhone, sendTextMessage } from "../clients/periskope.js";
 import {
   findRenewalJob,
   markReminderSent,
@@ -57,8 +57,10 @@ export async function sendOverdueReminder(
 
   const deal = await fetchDealWithLineItemsAndContact(dealId);
 
-  if (!deal.contactPhone) {
-    const reason = `No WhatsApp identifier (contact phone) found for deal ${dealId}`;
+  if (!deal.contactPhone || !isValidWhatsappPhone(deal.contactPhone)) {
+    const reason = deal.contactPhone
+      ? `Contact phone for deal ${dealId} is not a valid WhatsApp number: ${deal.contactPhone}`
+      : `No WhatsApp identifier (contact phone) found for deal ${dealId}`;
     await markReminderSkipped(supabase, job.id, reason);
     return { sent: false, skipReason: reason };
   }

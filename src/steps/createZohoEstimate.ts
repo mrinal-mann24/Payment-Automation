@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact, addLineItemToDeal, type HubspotLineItem } from "../clients/hubspot.js";
 import { createEstimate, findOrCreateCustomer } from "../clients/zoho.js";
 import {
+  claimZohoStep,
   createRenewalJob,
   findRenewalJob,
   markZohoStepDone,
@@ -33,6 +34,32 @@ export async function createZohoEstimate(
   }
 
   const job = existingJob ?? (await createRenewalJob(supabase, dealId, deal.billingPeriod));
+
+  if (job.zoho_step_status === "creating") {
+    // A previous run claimed this step and then crashed/died before
+    // recording the result — Zoho has no idempotency key on /estimates, so
+    // this can't be safely auto-resolved. Surface it loudly instead of
+    // silently creating a second real estimate; check Zoho for an
+    // estimate with reference_number = dealId before retrying manually.
+    throw new Error(
+      `renewal_jobs row for deal ${dealId} (${deal.billingPeriod}) is stuck in "creating" — ` +
+        `a previous run may have created a Zoho estimate that was never recorded. ` +
+        `Check Zoho for an estimate with reference_number "${dealId}" before retrying.`,
+    );
+  }
+
+  if (job.zoho_step_status === "pending") {
+    const claimed = await claimZohoStep(supabase, job.id);
+    if (!claimed) {
+      // Lost the claim race to a concurrent run for the same deal — refetch
+      // and let the normal "already done" short-circuit above handle it on
+      // the caller's next attempt rather than also calling Zoho here.
+      throw new Error(
+        `Could not claim Zoho estimate step for deal ${dealId} (${deal.billingPeriod}); ` +
+          `a concurrent run is already creating it`,
+      );
+    }
+  }
 
   try {
     // client_pricing is the source of truth for the renewal base price,

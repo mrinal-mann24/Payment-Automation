@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type StepStatus = "pending" | "done" | "failed";
+export type StepStatus = "pending" | "creating" | "done" | "failed";
+export type InvoiceStepStatus = "pending" | "converting" | "done" | "failed";
 
 export interface RenewalJob {
   id: string;
@@ -19,7 +20,7 @@ export interface RenewalJob {
   hubspot_updated: boolean;
   zoho_invoice_id: string | null;
   zoho_invoice_number: string | null;
-  invoice_step_status: StepStatus;
+  invoice_step_status: InvoiceStepStatus;
   periskope_payment_confirmed_sent: boolean;
   hubspot_renewal_done: boolean;
   reminder_1_sent_at: string | null;
@@ -103,6 +104,31 @@ export async function createRenewalJob(
   }
 
   return data as RenewalJob;
+}
+
+// Flips zoho_step_status from "pending" to "creating" right before calling
+// Zoho's /estimates endpoint, which has no client-side idempotency key. If
+// the process crashes after Zoho creates the estimate but before
+// markZohoStepDone writes the resulting ID back, the job is left at
+// "creating" rather than silently back at "pending" — so a resume can
+// detect this specific gap and warn loudly (a human should check Zoho for
+// an orphaned estimate) instead of quietly creating a second one.
+export async function claimZohoStep(supabase: SupabaseClient, jobId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      zoho_step_status: "creating",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId)
+    .eq("zoho_step_status", "pending")
+    .select("id");
+
+  if (error) {
+    throw new Error(`Failed to claim Zoho estimate step on renewal_jobs: ${error.message}`);
+  }
+
+  return (data?.length ?? 0) > 0;
 }
 
 export async function markZohoStepDone(
@@ -237,6 +263,35 @@ export async function markHubspotUpdated(supabase: SupabaseClient, jobId: string
   if (error) {
     throw new Error(`Failed to record HubSpot update on renewal_jobs: ${error.message}`);
   }
+}
+
+// Atomically claims the invoice-conversion step by flipping
+// invoice_step_status from "pending" to "converting", conditioned on it
+// still being "pending" at the DB level. Two concurrent Razorpay webhook
+// deliveries for the same job will race this update; only one can match
+// the .eq("invoice_step_status", "pending") filter, so only one caller
+// gets claimed:true and is allowed to call Zoho's non-idempotent
+// /invoices/fromestimates conversion. The loser gets claimed:false and
+// must not proceed.
+export async function claimInvoiceStep(
+  supabase: SupabaseClient,
+  jobId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      invoice_step_status: "converting",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId)
+    .eq("invoice_step_status", "pending")
+    .select("id");
+
+  if (error) {
+    throw new Error(`Failed to claim invoice step on renewal_jobs: ${error.message}`);
+  }
+
+  return (data?.length ?? 0) > 0;
 }
 
 export async function markInvoiceStepDone(

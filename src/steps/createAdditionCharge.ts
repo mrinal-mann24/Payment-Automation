@@ -2,9 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { createEstimate, findOrCreateCustomer, getEstimatePdf } from "../clients/zoho.js";
 import { createPaymentLink } from "../clients/razorpay.js";
-import { sendDocumentMessage } from "../clients/periskope.js";
+import { isValidWhatsappPhone, sendDocumentMessage } from "../clients/periskope.js";
 import {
   createAdditionChargeRow,
+  findRecentDuplicateAdditionCharge,
   markAdditionChargeDone,
   markAdditionChargeFailed,
 } from "../repositories/additionCharges.js";
@@ -27,6 +28,18 @@ export async function createAdditionCharge(
   description: string,
 ): Promise<CreateAdditionChargeResult> {
   const deal = await fetchDealWithLineItemsAndContact(dealId);
+
+  const duplicate = await findRecentDuplicateAdditionCharge(supabase, dealId, amount, description);
+  if (duplicate) {
+    return {
+      zohoEstimateNumber: duplicate.zoho_estimate_number ?? "",
+      zohoEstimateTotal: duplicate.zoho_estimate_total ?? 0,
+      razorpayShortUrl: duplicate.razorpay_short_url ?? "",
+      periskopeSent: duplicate.status === "done",
+      periskopeSkipReason: null,
+    };
+  }
+
   const row = await createAdditionChargeRow(supabase, dealId, amount, description);
 
   try {
@@ -54,8 +67,10 @@ export async function createAdditionCharge(
 
     let periskopeSent = false;
     let periskopeSkipReason: string | null = null;
-    if (!deal.contactPhone) {
-      periskopeSkipReason = `No WhatsApp identifier (contact phone) found for deal ${dealId}`;
+    if (!deal.contactPhone || !isValidWhatsappPhone(deal.contactPhone)) {
+      periskopeSkipReason = deal.contactPhone
+        ? `Contact phone for deal ${dealId} is not a valid WhatsApp number: ${deal.contactPhone}`
+        : `No WhatsApp identifier (contact phone) found for deal ${dealId}`;
     } else {
       const pdf = await getEstimatePdf(estimateId);
       const message = `Additional charge (${description}): ${estimateNumber}. Pay here: ${shortUrl}`;

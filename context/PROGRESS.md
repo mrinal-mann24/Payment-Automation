@@ -1,6 +1,6 @@
 # Progress tracker
 
-Last updated: 2026-07-31 (GST/TDS on estimates + `client_pricing` override, both live-verified; step 5 reminders disabled per instruction)
+Last updated: 2026-09-15 (bug-fix pass: High/Medium findings from a full-pipeline audit fixed; cron schedule doc corrected to 11:00 IST)
 
 ## How to use this file
 - Claude Code updates this after every change — don't let it go stale.
@@ -92,6 +92,82 @@ Last updated: 2026-07-31 (GST/TDS on estimates + `client_pricing` override, both
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-15 — Bug-fix pass addressing High and Medium findings from a
+  full-pipeline audit (Zoho client/scopes + concurrency/validation/
+  security across the whole codebase). All fixes are additive/surgical;
+  `npm run typecheck` and `npm test` (52/52) both pass after every change.
+  **High severity:**
+  1. **Concurrent Razorpay webhook deliveries could create duplicate Zoho
+     invoices.** `/invoices/fromestimates` is confirmed non-idempotent
+     (§3.3), and the existing `invoice_step_status` guard was a plain
+     read-then-act check with no row lock. Added `claimInvoiceStep`
+     (`src/repositories/renewalJobs.ts`) — an atomic
+     `UPDATE ... WHERE invoice_step_status = 'pending'` that flips it to
+     a new transient `"converting"` value, so only one concurrent caller
+     can win. `convertZohoInvoice.ts` now claims before calling Zoho; a
+     losing caller polls for the winner's result (`waitForInvoiceStepDone`,
+     5 attempts, 1s apart) instead of also converting.
+  2. **`addition_charges` had no unique constraint** (unlike
+     `renewal_jobs`/`client_pricing`), so double-clicking "Send" in the
+     no-auth pricing admin UI could create two full duplicate flows (Zoho
+     estimate, Razorpay link, WhatsApp send). Added
+     `findRecentDuplicateAdditionCharge`
+     (`src/repositories/additionCharges.ts`) — treats an identical
+     deal+amount+description charge created in the last 5 minutes and not
+     failed as the same request; `createAdditionCharge` returns that
+     existing result instead of creating a second one.
+  3. **A crash between Zoho estimate creation and the Supabase write
+     could create an orphaned, unrecorded estimate**, and resuming the
+     job would create a second real one (Zoho's `/estimates` has no
+     idempotency key). Added `claimZohoStep`
+     (`src/repositories/renewalJobs.ts`), same atomic-claim pattern as
+     above with a transient `"creating"` status. `createZohoEstimate.ts`
+     now throws a clear, actionable error if a job is found stuck in
+     `"creating"` on entry (naming the `reference_number` to check in
+     Zoho) instead of silently retrying.
+  4. **`POST /webhooks/renewal` had no auth and bypassed the
+     active-customer dealstage gate** that the automatic cron applies —
+     anyone who could reach the route could trigger a real charge for any
+     `deal_id`. Added a required `x-webhook-secret` header (new
+     `RENEWAL_WEBHOOK_SECRET` env var, checked with `timingSafeEqual`,
+     `src/routes/renewalWebhook.ts`) and applied the same
+     `VA_ACTIVE_CUSTOMER_DEALSTAGES` gate the cron uses. **Manual testing
+     of this route now requires the shared-secret header** — set
+     `RENEWAL_WEBHOOK_SECRET` in `.env` before testing or deploying.
+  5. **HubSpot line-item `price`/`quantity` were coerced with a bare
+     `Number(...)`**, so a blank/malformed value silently became `0`/`1`
+     instead of failing — capable of producing a real ₹0 Zoho estimate.
+     `fetchDealWithLineItemsAndContact` (`src/clients/hubspot.ts`) now
+     rejects any non-finite or negative value with a clear error.
+  **Medium severity:**
+  6. Zoho token refresh (`getAccessToken`) now de-dupes concurrent
+     cache-miss calls into one in-flight request instead of each caller
+     firing its own request at Zoho's OAuth endpoint.
+  7. Zoho OAuth params (`client_secret`, `refresh_token`, etc.) are now
+     sent as a POST body instead of URL query-string params — less likely
+     to end up in proxy/access logs, and this project has had a real
+     refresh-token-exposure incident before (see the still-open rotation
+     item below).
+  8. `createEstimate`'s response is now validated to have the expected
+     `estimate_id`/`estimate_number`/`total` fields before use, instead of
+     letting a malformed Zoho response surface later as an opaque
+     `undefined` crash.
+  9. Added `isValidWhatsappPhone` (`src/clients/periskope.ts`) — a
+     malformed HubSpot `phone` value no longer silently resolves to some
+     other real WhatsApp number. Every Periskope-sending step (3, 4, 5,
+     and addition charges) now treats an invalid phone the same as a
+     missing one: skip gracefully and record the reason.
+  **Also fixed**: the cron schedule was documented in `ARCHITECTURE.md`/
+  `PROGRESS.md` as 09:00 IST (changed from 06:00 on 2026-07-31), but the
+  actual code (`src/index.ts`) has run at **11:00 IST**
+  (`cron.schedule("0 11 * * *", ...)`) — an undocumented drift found
+  during the audit. Docs corrected to 11:00 IST to match deployed code;
+  the code itself was not changed.
+  **Not yet done**: no migration was needed (all new state is either
+  in-memory or reuses existing columns/tables with new string values), so
+  nothing new to apply to Supabase. `RENEWAL_WEBHOOK_SECRET` must be set
+  in the live `.env` before `/webhooks/renewal` will accept requests —
+  the existing deployment's `.env` does not have this yet.
 - 2026-07-31 — Added `client_pricing.deal_name`
   (`supabase/migrations/0009_client_pricing_deal_name.sql`, applied
   live) — a denormalized, non-authoritative copy of the HubSpot deal

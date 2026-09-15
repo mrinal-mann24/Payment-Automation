@@ -116,12 +116,36 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
       .filter(Boolean)
       .join(" "),
     contactPhone: contact.properties.phone ?? null,
-    lineItems: lineItems.map((item) => ({
-      id: item.id,
-      name: item.properties.name ?? "",
-      quantity: Number(item.properties.quantity ?? 1),
-      price: Number(item.properties.price ?? 0),
-    })),
+    lineItems: lineItems.map((item) => parseLineItem(dealId, item)),
+  };
+}
+
+function parseLineItem(dealId: string, item: HubspotLineItemResponse): HubspotLineItem {
+  const rawQuantity = item.properties.quantity;
+  const rawPrice = item.properties.price;
+  const quantity = rawQuantity === undefined ? 1 : Number(rawQuantity);
+  const price = rawPrice === undefined ? 0 : Number(rawPrice);
+
+  // HubSpot returns quantity/price as strings; a blank/malformed value
+  // (e.g. "") coerces to 0 via bare Number(), which would silently create
+  // a real ₹0 Zoho estimate instead of failing loudly. Reject anything
+  // that isn't a finite, non-negative number instead.
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    throw new Error(
+      `HubSpot line item ${item.id} on deal ${dealId} has an invalid quantity: ${JSON.stringify(rawQuantity)}`,
+    );
+  }
+  if (!Number.isFinite(price) || price < 0) {
+    throw new Error(
+      `HubSpot line item ${item.id} on deal ${dealId} has an invalid price: ${JSON.stringify(rawPrice)}`,
+    );
+  }
+
+  return {
+    id: item.id,
+    name: item.properties.name ?? "",
+    quantity,
+    price,
   };
 }
 

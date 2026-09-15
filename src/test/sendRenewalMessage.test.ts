@@ -9,6 +9,7 @@ vi.mock("../clients/zoho.js", () => ({
 }));
 vi.mock("../clients/periskope.js", () => ({
   sendDocumentMessage: vi.fn(),
+  isValidWhatsappPhone: vi.fn(),
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
   findRenewalJob: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock("../repositories/renewalJobs.js", () => ({
 
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { getEstimatePdf } from "../clients/zoho.js";
-import { sendDocumentMessage } from "../clients/periskope.js";
+import { isValidWhatsappPhone, sendDocumentMessage } from "../clients/periskope.js";
 import {
   findRenewalJob,
   markPeriskopeSent,
@@ -69,6 +70,7 @@ const fakeDeal = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isValidWhatsappPhone).mockReturnValue(true);
 });
 
 describe("sendRenewalMessage", () => {
