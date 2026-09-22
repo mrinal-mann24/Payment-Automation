@@ -507,6 +507,22 @@ export async function markReminderSkipped(
   }
 }
 
+// What the admin page shows per deal: every unpaid cycle plus the current
+// month's, newest first.
+export async function findAdminCycleJobs(supabase: SupabaseClient, currentMonthKey: string): Promise<RenewalJob[]> {
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .select("*")
+    .or(`paid_at.is.null,billing_period.eq.${currentMonthKey}`)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to look up renewal_jobs rows for the admin page: ${error.message}`);
+  }
+
+  return (data ?? []) as RenewalJob[];
+}
+
 export async function findRenewalJobById(supabase: SupabaseClient, jobId: string): Promise<RenewalJob | null> {
   const { data, error } = await supabase.from("renewal_jobs").select("*").eq("id", jobId).maybeSingle();
 
