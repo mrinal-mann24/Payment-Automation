@@ -43,8 +43,7 @@ cron.schedule("0 11 * * *", async () => {
     console.error("[settlementSweep] run failed:", err);
   });
 
-  // Reminders disabled for now — do not send to clients until re-enabled.
-  // await runOverdueReminderCheck().catch((err) => {
-  //   console.error("[reminderCron] run failed:", err);
-  // });
+  await runOverdueReminderCheck(now).catch((err) => {
+    console.error("[reminderCron] run failed:", err);
+  });
 }, { timezone: "Asia/Kolkata", noOverlap: true });

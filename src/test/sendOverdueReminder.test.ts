@@ -10,7 +10,8 @@ vi.mock("../clients/periskope.js", () => ({
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
   findRenewalJob: vi.fn(),
-  markReminderSent: vi.fn(),
+  claimReminder: vi.fn(),
+  releaseReminder: vi.fn(),
   markReminderSkipped: vi.fn(),
 }));
 
@@ -21,7 +22,7 @@ vi.mock("../repositories/clients.js", () => ({
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { findWhatsappGroupId } from "../repositories/clients.js";
 import { isValidWhatsappRecipient, sendTextMessage } from "../clients/periskope.js";
-import { findRenewalJob, markReminderSent, markReminderSkipped } from "../repositories/renewalJobs.js";
+import { claimReminder, findRenewalJob, markReminderSkipped, releaseReminder } from "../repositories/renewalJobs.js";
 import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
 
 const fakeSupabase = {} as SupabaseClient;
@@ -81,6 +82,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isValidWhatsappRecipient).mockReturnValue(true);
   vi.mocked(findWhatsappGroupId).mockResolvedValue(null);
+  vi.mocked(claimReminder).mockResolvedValue(true);
 });
 
 describe("sendOverdueReminder", () => {
@@ -122,7 +124,7 @@ describe("sendOverdueReminder", () => {
 
     expect(result).toEqual({ sent: true, skipReason: null });
     expect(sendTextMessage).toHaveBeenCalledWith("919876543210", expect.stringContaining("https://rzp.io/i/1"));
-    expect(markReminderSent).toHaveBeenCalledWith(fakeSupabase, "job-1", 1);
+    expect(claimReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 1);
   });
 
   it("sends reminder 3 with a discontinuation notice (REQ-5.4)", async () => {
@@ -135,7 +137,7 @@ describe("sendOverdueReminder", () => {
       "919876543210",
       expect.stringMatching(/discontinued/i),
     );
-    expect(markReminderSent).toHaveBeenCalledWith(fakeSupabase, "job-1", 3);
+    expect(claimReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 3);
   });
 
   it("is idempotent: does not resend a stage that's already sent (REQ-5.6)", async () => {
@@ -160,5 +162,39 @@ describe("sendOverdueReminder recipient", () => {
     await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
 
     expect(sendTextMessage).toHaveBeenCalledWith("120363012345678901", expect.any(String));
+  });
+});
+
+describe("sendOverdueReminder claim-before-send", () => {
+  it("never reminds a cycle that has been paid (TEST 5, TEST 6)", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, paid_at: "2026-10-06T04:00:00Z", payment_method: "yes_bank" });
+
+    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 2);
+
+    expect(result).toEqual({ sent: false, skipReason: null });
+    expect(sendTextMessage).not.toHaveBeenCalled();
+    expect(claimReminder).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the atomic claim is lost (duplicate cron run or paid meanwhile) (TEST 9)", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(claimReminder).mockResolvedValue(false);
+
+    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
+
+    expect(result.sent).toBe(false);
+    expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim when the WhatsApp send throws so the next run retries", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(sendTextMessage).mockRejectedValue(new Error("Periskope API error 500"));
+
+    await expect(sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1)).rejects.toThrow(/500/);
+
+    expect(claimReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 1);
+    expect(releaseReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 1);
   });
 });

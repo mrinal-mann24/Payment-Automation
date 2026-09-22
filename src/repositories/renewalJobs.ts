@@ -80,15 +80,20 @@ export async function findRenewalJobByEstimateNumber(
   return data as RenewalJob | null;
 }
 
-export async function findOverdueUnpaidJobs(supabase: SupabaseClient): Promise<RenewalJob[]> {
+// Monthly cycles of the given month (YYYY-MM) whose quote + link went out
+// but which have not been paid — the only rows reminders are ever sent for.
+// Legacy (due-date keyed) rows never match a month key, so non-monthly
+// customers get no monthly reminders.
+export async function findUnpaidMonthlyJobs(supabase: SupabaseClient, monthKey: string): Promise<RenewalJob[]> {
   const { data, error } = await supabase
     .from("renewal_jobs")
     .select("*")
+    .eq("billing_period", monthKey)
     .eq("razorpay_step_status", "done")
-    .neq("invoice_step_status", "done");
+    .is("paid_at", null);
 
   if (error) {
-    throw new Error(`Failed to look up overdue unpaid renewal_jobs rows: ${error.message}`);
+    throw new Error(`Failed to look up unpaid monthly renewal_jobs rows: ${error.message}`);
   }
 
   return (data ?? []) as RenewalJob[];
@@ -437,7 +442,36 @@ const REMINDER_STAGE_COLUMN: Record<ReminderStage, "reminder_1_sent_at" | "remin
   3: "reminder_3_sent_at",
 };
 
-export async function markReminderSent(
+// Atomically claims a reminder stage: the column is stamped only while it
+// is still null AND the cycle is still unpaid, so the paid check and the
+// duplicate-run guard are one statement evaluated right before the send.
+export async function claimReminder(
+  supabase: SupabaseClient,
+  jobId: string,
+  stage: ReminderStage,
+): Promise<boolean> {
+  const column = REMINDER_STAGE_COLUMN[stage];
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      [column]: new Date().toISOString(),
+      reminder_skip_reason: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId)
+    .is(column, null)
+    .is("paid_at", null)
+    .select("id");
+
+  if (error) {
+    throw new Error(`Failed to claim reminder ${stage} on renewal_jobs: ${error.message}`);
+  }
+
+  return (data?.length ?? 0) > 0;
+}
+
+// Undo a claim whose send failed, so the next run retries it.
+export async function releaseReminder(
   supabase: SupabaseClient,
   jobId: string,
   stage: ReminderStage,
@@ -445,14 +479,13 @@ export async function markReminderSent(
   const { error } = await supabase
     .from("renewal_jobs")
     .update({
-      [REMINDER_STAGE_COLUMN[stage]]: new Date().toISOString(),
-      reminder_skip_reason: null,
+      [REMINDER_STAGE_COLUMN[stage]]: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", jobId);
 
   if (error) {
-    throw new Error(`Failed to record reminder ${stage} sent on renewal_jobs: ${error.message}`);
+    throw new Error(`Failed to release reminder ${stage} on renewal_jobs: ${error.message}`);
   }
 }
 

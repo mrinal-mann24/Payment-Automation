@@ -1,14 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { daysOverdue, nextDueStage, parseDueDate } from "../jobs/reminderCron.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const baseJob = {
+vi.mock("../clients/supabase.js", () => ({ getSupabaseClient: () => ({}) }));
+vi.mock("../repositories/renewalJobs.js", () => ({ findUnpaidMonthlyJobs: vi.fn() }));
+vi.mock("../clients/razorpay.js", () => ({ fetchPaymentLink: vi.fn() }));
+vi.mock("../steps/sendOverdueReminder.js", () => ({ sendOverdueReminder: vi.fn() }));
+vi.mock("../steps/settleRenewalPayment.js", () => ({ settleRenewalPayment: vi.fn() }));
+
+import { findUnpaidMonthlyJobs } from "../repositories/renewalJobs.js";
+import { fetchPaymentLink } from "../clients/razorpay.js";
+import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
+import { settleRenewalPayment } from "../steps/settleRenewalPayment.js";
+import { reminderStageForDay, runOverdueReminderCheck } from "../jobs/reminderCron.js";
+
+const unpaidJob = {
   id: "job-1",
   hubspot_deal_id: "deal-1",
-  billing_period: "Monthly-2026-07-10",
-  status: "done" as const,
-  zoho_estimate_id: "zest-123",
-  zoho_estimate_number: "EST-000123",
-  zoho_estimate_total: 1000,
+  billing_period: "2026-10",
+  status: "done",
+  zoho_estimate_id: "zest-1",
+  zoho_estimate_number: "QT-1",
+  zoho_estimate_total: 5400,
   zoho_step_status: "done" as const,
   razorpay_payment_link_id: "plink-1",
   razorpay_short_url: "https://rzp.io/i/1",
@@ -25,8 +36,8 @@ const baseJob = {
   reminder_2_sent_at: null,
   reminder_3_sent_at: null,
   reminder_skip_reason: null,
-  service_period_start: null,
-  billed_price: null,
+  service_period_start: "2026-10-01",
+  billed_price: 5000,
   paid_at: null,
   payment_method: null,
   payment_amount: null,
@@ -34,68 +45,85 @@ const baseJob = {
   payment_narration: null,
   payment_reference: null,
   hubspot_line_item_id: null,
-  estimate_email_sent: false,
+  estimate_email_sent: true,
   invoice_email_sent: false,
   email_error: null,
   error_log: null,
-  created_at: "2026-07-01T00:00:00Z",
-  updated_at: "2026-07-01T00:00:00Z",
+  created_at: "2026-10-01T05:30:00Z",
+  updated_at: "2026-10-01T05:30:00Z",
 };
 
-describe("parseDueDate", () => {
-  it("parses the trailing YYYY-MM-DD out of billing_period regardless of billing_cycle value", () => {
-    expect(parseDueDate("Monthly-2026-07-10")?.toISOString()).toBe("2026-07-10T00:00:00.000Z");
-    expect(parseDueDate("Quarterly-2026-08-15")?.toISOString()).toBe("2026-08-15T00:00:00.000Z");
-    expect(parseDueDate("Annual-2027-01-01")?.toISOString()).toBe("2027-01-01T00:00:00.000Z");
-  });
+// 11:00 IST on the given October day.
+const istTick = (day: number) => new Date(`2026-10-${String(day).padStart(2, "0")}T05:30:00Z`);
 
-  it("returns null for an unparseable billing_period", () => {
-    expect(parseDueDate("garbage")).toBeNull();
-    expect(parseDueDate("")).toBeNull();
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(findUnpaidMonthlyJobs).mockResolvedValue([unpaidJob]);
+  vi.mocked(fetchPaymentLink).mockResolvedValue({ id: "plink-1", status: "created", short_url: "https://rzp.io/i/1" });
+  vi.mocked(sendOverdueReminder).mockResolvedValue({ sent: true, skipReason: null });
+});
+
+describe("reminderStageForDay", () => {
+  it("maps the 5th/6th, 7th/8th and 9th/10th to stages 1, 2 and 3 and nothing else", () => {
+    expect([1, 4, 5, 6, 7, 8, 9, 10, 11, 31].map(reminderStageForDay)).toEqual([
+      null, null, 1, 1, 2, 2, 3, 3, null, null,
+    ]);
   });
 });
 
-describe("daysOverdue", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
+describe("runOverdueReminderCheck", () => {
+  it("on the 5th sends reminder 1 for every unpaid current-month cycle (TEST 4)", async () => {
+    await runOverdueReminderCheck(istTick(5), { pauseMs: 0 });
+
+    expect(findUnpaidMonthlyJobs).toHaveBeenCalledWith(expect.anything(), "2026-10");
+    expect(sendOverdueReminder).toHaveBeenCalledWith(expect.anything(), "deal-1", "2026-10", 1);
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
+  it("on the 7th and 9th sends stages 2 and 3 (TEST 4)", async () => {
+    await runOverdueReminderCheck(istTick(7), { pauseMs: 0 });
+    await runOverdueReminderCheck(istTick(9), { pauseMs: 0 });
+
+    expect(vi.mocked(sendOverdueReminder).mock.calls.map((c) => c[3])).toEqual([2, 3]);
   });
 
-  it("computes whole days between the due date and today (UTC)", () => {
-    vi.setSystemTime(new Date("2026-07-12T09:00:00Z"));
-    expect(daysOverdue(new Date("2026-07-10T00:00:00Z"))).toBe(2);
+  it("does nothing on days outside the reminder schedule", async () => {
+    await runOverdueReminderCheck(istTick(4), { pauseMs: 0 });
+    await runOverdueReminderCheck(istTick(11), { pauseMs: 0 });
+
+    expect(findUnpaidMonthlyJobs).not.toHaveBeenCalled();
+    expect(sendOverdueReminder).not.toHaveBeenCalled();
   });
 
-  it("returns 0 the day of, and negative before the due date", () => {
-    vi.setSystemTime(new Date("2026-07-10T23:00:00Z"));
-    expect(daysOverdue(new Date("2026-07-10T00:00:00Z"))).toBe(0);
-    vi.setSystemTime(new Date("2026-07-09T00:00:00Z"));
-    expect(daysOverdue(new Date("2026-07-10T00:00:00Z"))).toBe(-1);
-  });
-});
+  it("recovers a missed tick on the 6th but never re-sends a stage that already went out (TEST 9)", async () => {
+    vi.mocked(findUnpaidMonthlyJobs).mockResolvedValue([
+      unpaidJob,
+      { ...unpaidJob, id: "job-2", hubspot_deal_id: "deal-2", reminder_1_sent_at: "2026-10-05T05:31:00Z" },
+    ]);
 
-describe("nextDueStage", () => {
-  it("returns stage 1 at exactly 2 days overdue if not yet sent (REQ-5.2)", () => {
-    expect(nextDueStage(baseJob, 2)).toBe(1);
+    await runOverdueReminderCheck(istTick(6), { pauseMs: 0 });
+
+    expect(vi.mocked(sendOverdueReminder).mock.calls.map((c) => c[1])).toEqual(["deal-1"]);
   });
 
-  it("returns stage 2 at exactly 4 days overdue if not yet sent (REQ-5.3)", () => {
-    expect(nextDueStage(baseJob, 4)).toBe(2);
+  it("settles instead of reminding when Razorpay shows the link as paid (lost-webhook guard)", async () => {
+    vi.mocked(fetchPaymentLink).mockResolvedValue({ id: "plink-1", status: "paid", short_url: "https://rzp.io/i/1" });
+
+    await runOverdueReminderCheck(istTick(5), { pauseMs: 0 });
+
+    expect(settleRenewalPayment).toHaveBeenCalledWith(
+      expect.anything(),
+      unpaidJob,
+      expect.objectContaining({ method: "razorpay" }),
+    );
+    expect(sendOverdueReminder).not.toHaveBeenCalled();
   });
 
-  it("returns stage 3 at exactly 7 days overdue if not yet sent (REQ-5.4)", () => {
-    expect(nextDueStage(baseJob, 7)).toBe(3);
-  });
+  it("keeps going when one job fails", async () => {
+    vi.mocked(findUnpaidMonthlyJobs).mockResolvedValue([unpaidJob, { ...unpaidJob, id: "job-2", hubspot_deal_id: "deal-2" }]);
+    vi.mocked(sendOverdueReminder).mockRejectedValueOnce(new Error("Periskope API error 500"));
 
-  it("returns null on a day that doesn't match any reminder stage", () => {
-    expect(nextDueStage(baseJob, 3)).toBeNull();
-    expect(nextDueStage(baseJob, 10)).toBeNull();
-  });
+    await runOverdueReminderCheck(istTick(5), { pauseMs: 0 });
 
-  it("does not resend a stage that's already been sent (REQ-5.6)", () => {
-    expect(nextDueStage({ ...baseJob, reminder_1_sent_at: "2026-07-12T06:00:00Z" }, 2)).toBeNull();
+    expect(vi.mocked(sendOverdueReminder).mock.calls.map((c) => c[1])).toEqual(["deal-1", "deal-2"]);
   });
 });

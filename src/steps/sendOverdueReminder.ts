@@ -2,9 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { sendTextMessage } from "../clients/periskope.js";
 import {
+  claimReminder,
   findRenewalJob,
-  markReminderSent,
   markReminderSkipped,
+  releaseReminder,
   type ReminderStage,
 } from "../repositories/renewalJobs.js";
 import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
@@ -41,12 +42,13 @@ export async function sendOverdueReminder(
     );
   }
 
-  if (job.invoice_step_status === "done") {
+  // Paid by any route means no more reminders for this cycle (REQ-5.7).
+  if (job.paid_at || job.invoice_step_status === "done") {
     return { sent: false, skipReason: null };
   }
 
-  const stageColumn = { 1: job.reminder_1_sent_at, 2: job.reminder_2_sent_at, 3: job.reminder_3_sent_at }[stage];
-  if (stageColumn) {
+  const stageSentAt = { 1: job.reminder_1_sent_at, 2: job.reminder_2_sent_at, 3: job.reminder_3_sent_at }[stage];
+  if (stageSentAt) {
     return { sent: true, skipReason: null };
   }
 
@@ -64,8 +66,20 @@ export async function sendOverdueReminder(
     return { sent: false, skipReason: target.skipReason };
   }
 
-  await sendTextMessage(target.recipient, reminderMessage(stage, job.razorpay_short_url));
+  // Claim right before sending: the stage is stamped only if it is still
+  // unsent AND the cycle is still unpaid, so a duplicate cron run or a
+  // payment that landed a moment ago sends nothing.
+  const claimed = await claimReminder(supabase, job.id, stage);
+  if (!claimed) {
+    return { sent: false, skipReason: null };
+  }
 
-  await markReminderSent(supabase, job.id, stage);
+  try {
+    await sendTextMessage(target.recipient, reminderMessage(stage, job.razorpay_short_url));
+  } catch (err) {
+    await releaseReminder(supabase, job.id, stage);
+    throw err;
+  }
+
   return { sent: true, skipReason: null };
 }
