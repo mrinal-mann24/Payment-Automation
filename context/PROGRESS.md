@@ -1,6 +1,6 @@
 # Progress tracker
 
-Last updated: 2026-09-15 (bug-fix pass: High/Medium findings from a full-pipeline audit fixed; cron schedule doc corrected to 11:00 IST)
+Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email delivery, one settlement path for Razorpay / Yes Bank / manual payments, 5th/7th/9th reminders, admin billing-cycle view — `context/features/step6.md`)
 
 ## How to use this file
 - Claude Code updates this after every change — don't let it go stale.
@@ -16,11 +16,15 @@ Last updated: 2026-09-15 (bug-fix pass: High/Medium findings from a full-pipelin
 | 2 — Razorpay payment link | `context/features/step2.md` | Done | Fully verified end-to-end against real data: real test deal → real Zoho estimate (`QT-000416`) → real live-mode Razorpay payment link (`plink_TG6rOiKpZwe2xM`). Idempotency confirmed live (identical re-run reused both). |
 | 3 — Send quote + payment link via Periskope | `context/features/step3.md` | Done | Fully verified live end-to-end against the real test deal: real Zoho estimate PDF download → real Periskope WhatsApp send (confirmed `delivered` + received) → `renewal_jobs` marked done. No HubSpot write (see notes below — there's no real "Quote Sent" stage). Idempotent re-run confirmed. |
 | 4 — Razorpay webhook → Zoho invoice → WhatsApp confirmation | `context/features/step4.md` | Done | Live-verified end-to-end 2026-07-22: real Razorpay test-mode payment → signature-verified webhook → real Zoho invoice created (`INV-10589`) and read back correctly → Periskope WhatsApp message **with invoice PDF attached** → HubSpot deal moved to "Renewal Done". `renewal_jobs` row confirmed clean (`invoice_step_status: done`, `periskope_payment_confirmed_sent: true`, `hubspot_renewal_done: true`, `error_log: null`). |
-| 5 — Overdue payment reminders (WhatsApp, T+2/T+4/T+7) | `context/features/step5.md` | Disabled | Implemented 2026-07-23 (see below), but **`runOverdueReminderCheck` is commented out in `src/index.ts` as of 2026-07-31, per explicit instruction — no reminders currently send to anyone.** Code and migration untouched; re-enable by uncommenting the call in `src/index.ts`. |
+| 5 — Overdue payment reminders (WhatsApp) | `context/features/step5.md` → superseded by `step6.md` | Done (re-enabled) | Rewritten 2026-09-22 to the 5th/7th/9th IST schedule for monthly cycles (atomic claim before send, paid cycles never reminded, Razorpay lost-webhook guard) and re-enabled in `src/index.ts`. Nothing can fire before the first `YYYY-MM` cycle exists (October 2026). Message copy is still the placeholder. |
 | 6 — GST + TDS on renewal estimates | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Live-verified: correct GST18 + TDS 10% math on two real estimates via the full webhook pipeline. |
 | 7 — Supabase `client_pricing` renewal-price override | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Renewal pipeline reads the override, live-verified; all 27 real VA-pipeline deals seeded from HubSpot. Editable via the admin interface (step 8). `addition_price` column was added, found unused after the addition-charges revision (step 9), and **dropped** same day (`0008_drop_client_pricing_addition_price.sql`). |
 | 8 — Pricing admin interface (`/admin/pricing`) | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Lists VA-pipeline deals, editable base price (saves to `client_pricing`), and an addition amount+description+Send control per deal. **No auth** — known, deferred gap. |
 | 9 — Addition charges (one-off quote/link/WhatsApp, separate from renewal) | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Own table (`addition_charges`), own quote+Razorpay link+WhatsApp send (with quote PDF), and own payment→invoice→WhatsApp-confirmation flow (with invoice PDF) mirroring the renewal pipeline's step 4 — both live-verified via a simulated signed Razorpay webhook. |
+| 10 — Monthly billing cycles (calendar-month quotes, "Virtual Accounting / Service period: …") | `context/features/step6.md` | Done — unit-tested; live verification pending | Migration `0010` applied live. Generator runs IST days 1–4; first cycle is October 2026. Classification rendered live on the admin page 2026-09-22 (28 deals). See the 2026-09-22 changelog. |
+| 11 — WhatsApp group + Zoho email delivery | `context/features/step6.md` | Done — live verification pending | Group id from `clients.whatsapp_group_id` (24/27 billed deals have one; contact phone fallback). Email via Zoho Books' email API — **not yet exercised live** (token scope, PDF attachment, DRAFT→SENT side effect to confirm). |
+| 12 — One settlement path (Razorpay / Yes Bank / manual) + HubSpot Renewal line item | `context/features/step6.md` | Done — unit-tested; live verification pending | `settleRenewalPayment` with atomic `claimPayment`, Razorpay link cancelled on manual payment, independent idempotent steps, daily sweep; `markRenewalDone` creates one complete HubSpot line item and stores its id. |
+| 13 — Admin billing-cycle view + "Paid through Yes Bank" / "Add One-Time Payment" | n/a | Done — rendered live 2026-09-22 | `/admin/pricing` shows Monthly / Not monthly (+ reason) per deal and a Billing-cycles table; `POST /admin/pricing/record-payment`. Still no auth (business decision). |
 
 ## Blocked / open questions
 - No auth on `/admin/pricing` or its two POST endpoints — anyone who
@@ -36,11 +40,29 @@ Last updated: 2026-09-15 (bug-fix pass: High/Medium findings from a full-pipelin
   scope, and was briefly visible in a chat transcript during the
   exchange — flagged for a further rotation once things are confirmed
   stable, same caution as the still-open 2026-07-22 exposure below.
-- Step 5 (overdue reminders) is fully implemented but **intentionally
-  disabled** (see Status table) — re-enable only on explicit instruction.
-- Step 5's migration (`0004_renewal_jobs_step5.sql`) has not been applied
-  to the live Supabase project yet — apply before `runOverdueReminderCheck`
-  is used for real.
+- ~~Step 5 (overdue reminders) is fully implemented but intentionally
+  disabled~~ — **re-enabled 2026-09-22** with the 5th/7th/9th schedule the
+  business asked for (`context/features/step6.md`).
+- ~~Step 5's migration (`0004_renewal_jobs_step5.sql`) has not been applied
+  to the live Supabase project yet~~ — **resolved 2026-09-21**: confirmed
+  applied live via `list_tables`; the note was stale.
+- **Live verification still owed for the 2026-09-22 monthly-billing work**,
+  on test deal `337128679127` (its line items are bare — no term/end date —
+  so it currently classifies as *not monthly*; give it a monthly/P1M line
+  item first): Zoho email-estimate / email-invoice (current token scope,
+  PDF attached?, DRAFT→SENT side effect, bold "Virtual Accounting" +
+  description on the PDF), a Periskope send to a real test **group** id
+  (none exists on the test deal's `clients` row yet), a HubSpot
+  `createRenewalLineItem` (does `hs_product_id` override name/price?),
+  Razorpay `cancelPaymentLink`, a simulated `payment_link.paid` delivered
+  twice, and "Paid through Yes Bank" / "Add One-Time Payment" from the
+  admin page. All sends reach real channels, so these need an explicit
+  go-ahead.
+- Zoho org setting to check before October: no Zoho customer payment is
+  recorded (unchanged), so if Zoho's own automated payment reminders are
+  on, Zoho will chase customers we have marked paid.
+- The reference invoice image mentioned in the 2026-09-21 brief never
+  arrived; the quote/invoice layout has not been compared against it.
 - Step 5's three WhatsApp reminder message texts are placeholder copy,
   not yet confirmed by the business (see
   `src/steps/sendOverdueReminder.ts::reminderMessage`).
@@ -92,6 +114,65 @@ Last updated: 2026-09-15 (bug-fix pass: High/Medium findings from a full-pipelin
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 — Monthly billing cycles for VA customers (spec:
+  `context/features/step6.md`; design decisions confirmed with the
+  business 2026-09-21; `ARCHITECTURE.md` §3.8). Built as TDD checkpoint
+  commits (RED confirmed before each production change); `npm run
+  typecheck` clean and `npm test` green after every one — 126/126 at the
+  end, up from 52/52:
+  1. Migration `supabase/migrations/0010_renewal_jobs_monthly_billing.sql`
+     (applied live): `service_period_start`, `billed_price`, `paid_at`,
+     `payment_method/amount/date/narration/reference`,
+     `hubspot_line_item_id`, `estimate_email_sent`, `invoice_email_sent`,
+     `email_error`; partial unique index on `zoho_estimate_number`.
+  2. `src/utils/billingCycle.ts` — IST date helpers (fixed +05:30 on UTC
+     getters); `servicePeriod("2026-10")` → "Service period: 1 October
+     2026 to 31 October 2026".
+  3. `src/clients/hubspot.ts::fetchVaDealsWithLineItems` (search +
+     associations batch + line-item batch reads chunked by 100; per-deal
+     parse errors recorded, not thrown) and
+     `src/utils/monthlyEligibility.ts::classifyDeal`.
+  4. `createEstimate(…, cycle)` bills one "Virtual Accounting" line with
+     the service-period description; `createZohoEstimate(…, cycle)` keys
+     the row by month, requires a `client_pricing` row for a monthly cycle,
+     records `billed_price`/`service_period_start`, and no longer writes
+     the quote-time HubSpot log-back line item.
+  5. WhatsApp group recipient (`src/repositories/clients.ts`,
+     `src/steps/whatsappRecipient.ts`, `periskope.ts::isValidWhatsappRecipient`)
+     for quote, confirmation and reminders; contact phone fallback.
+  6. Zoho email of quote and invoice (`zoho.ts::emailEstimate/emailInvoice`,
+     `src/steps/sendQuoteEmail.ts`, `src/steps/sendInvoiceEmail.ts`,
+     best-effort with `email_error`).
+  7. `src/jobs/monthlyBillingCron.ts` (IST days 1–4), shared
+     `src/jobs/renewalPipeline.ts`, legacy `runRenewalCheck(monthlyDealIds,
+     now)` skips monthly deals and queries Neon by IST date,
+     `/webhooks/renewal` classifies the deal, cron `noOverlap`, fail-closed
+     when classification fails.
+  8. `src/steps/settleRenewalPayment.ts` (one path for Razorpay / Yes Bank /
+     manual; atomic `claimPayment`; link cancelled first on a manual
+     payment; independent idempotent steps; in-flight guard),
+     `src/jobs/settlementSweep.ts`, `convertZohoInvoice` reclaims
+     failed/stale steps and no longer requires the link step,
+     `markRenewalDone` creates ONE complete HubSpot "Renewal" line item
+     (adopts a hand-entered one; id stored before the stage move),
+     `razorpay.ts::fetchPaymentLink/cancelPaymentLink`, webhook reads the
+     payment id/amount/date and answers 502 (outstanding steps) / 503
+     (in progress) so Razorpay retries.
+  9. Reminders rewritten to IST days 5–6 / 7–8 / 9–10 with `claimReminder`
+     / `releaseReminder`, `findUnpaidMonthlyJobs`, a Razorpay lost-webhook
+     guard, and re-enabled in `src/index.ts`; the old T+2/4/7 helpers were
+     removed.
+  10. Admin: Billing column, Billing-cycles table, "Paid through Yes Bank"
+     and "Add One-Time Payment" → `POST /admin/pricing/record-payment`.
+     Rendered live against real HubSpot + Supabase data (28 deals
+     classified; cycles table empty as expected before 1 Oct).
+  **Found while testing, left as-is**: `parseLineItem` accepts a blank
+  HubSpot price (`Number("") === 0`) despite the 2026-09-15 note; only
+  legacy deals without a `client_pricing` row are exposed. Pre-existing
+  unused import `upsertClientPricing` in `createZohoEstimate.ts` left
+  alone.
+  **Not yet done**: the live spikes listed under "Blocked / open
+  questions" — every one sends to a real channel.
 - 2026-09-15 — Bug-fix pass addressing High and Medium findings from a
   full-pipeline audit (Zoho client/scopes + concurrency/validation/
   security across the whole codebase). All fixes are additive/surgical;
