@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { getSupabaseClient } from "../clients/supabase.js";
-import { asEmail, fetchVaDealEmails, fetchVaDealsWithLineItems, updateDealBillingPocEmail, type DealEmails } from "../clients/hubspot.js";
+import { asEmail, fetchVaDealEmails, fetchVaDealsWithLineItems, updateDealAccountantEmail, type DealEmails } from "../clients/hubspot.js";
 import { generateRenewalQuote, QuoteNotDueError } from "../jobs/generateRenewalQuote.js";
 import { listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
 import { upsertClientPricing } from "../repositories/clientPricing.js";
@@ -104,19 +104,19 @@ function additionView(charge: AdditionCharge, dealNames: Map<string, string>) {
   };
 }
 
-// Where this deal's quotes and invoices are emailed: the Billing POC Email
+// Where this deal's quotes and invoices are emailed: the Accountant Email
 // when it is a real address, else the primary contact's email.
 function emailView(emails: DealEmails | undefined) {
-  const billingPocEmail = emails?.billingPocEmail ?? null;
+  const accountantEmail = emails?.accountantEmail ?? null;
   const contactEmail = emails?.contactEmail ?? null;
-  const pocValid = asEmail(billingPocEmail) !== null;
-  const sendsTo = pocValid ? billingPocEmail : contactEmail;
+  const accountantValid = asEmail(accountantEmail) !== null;
+  const sendsTo = accountantValid ? accountantEmail : contactEmail;
   return {
-    billingPocEmail,
-    pocValid,
+    accountantEmail,
+    accountantValid,
     contactEmail,
     sendsTo,
-    source: pocValid ? "billing_poc" : contactEmail ? "contact" : null,
+    source: accountantValid ? "accountant" : contactEmail ? "contact" : null,
   };
 }
 
@@ -188,15 +188,15 @@ pricingAdminRouter.post("/admin/pricing/base-price", async (req: Request, res: R
   }
 });
 
-// Billing POC Email lives on the HubSpot deal; the page edits it in place.
+// Accountant Email lives on the HubSpot deal; the page edits it in place.
 // Blank clears it (quotes then go to the contact's email again).
-const billingEmailSchema = z.object({
+const accountantEmailSchema = z.object({
   dealId: z.string().min(1),
   email: z.string().trim().max(200),
 });
 
-pricingAdminRouter.post("/admin/pricing/billing-email", async (req: Request, res: Response) => {
-  const parsed = billingEmailSchema.safeParse(req.body);
+pricingAdminRouter.post("/admin/pricing/accountant-email", async (req: Request, res: Response) => {
+  const parsed = accountantEmailSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
     return;
@@ -208,12 +208,12 @@ pricingAdminRouter.post("/admin/pricing/billing-email", async (req: Request, res
   }
 
   try {
-    await updateDealBillingPocEmail(parsed.data.dealId, email);
-    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> billing POC email ${email ? "updated" : "cleared"}`);
+    await updateDealAccountantEmail(parsed.data.dealId, email);
+    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> accountant email ${email ? "updated" : "cleared"}`);
     res.status(200).json({ ok: true, email });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    res.status(502).json({ error: "Failed to update the billing email in HubSpot", details: message });
+    res.status(502).json({ error: "Failed to update the accountant email in HubSpot", details: message });
   }
 });
 

@@ -161,7 +161,7 @@ export const pricingAdminHtml = `<!doctype html>
     <div class="card-head">
       <h2>Clients</h2>
       <span class="count" id="deals-count"></span>
-      <p>How each client is billed, decided from the latest HubSpot line item's term. <strong>Quote now</strong> appears when a cycle is due and nothing has been sent. Quotes and invoices are emailed to the <strong>Billing email</strong> (HubSpot's Billing POC Email; saving writes it back to HubSpot) and sent to the client's WhatsApp group.</p>
+      <p>How each client is billed, decided from the latest HubSpot line item's term. <strong>Quote now</strong> appears when a cycle is due and nothing has been sent. Quotes and invoices are emailed to the <strong>Accountant email</strong> (HubSpot's Accountant Email field; saving writes it back to HubSpot) and sent to the client's WhatsApp group.</p>
     </div>
     <div class="table-wrap">
       <table>
@@ -170,7 +170,7 @@ export const pricingAdminHtml = `<!doctype html>
             <th style="min-width:200px">Deal</th>
             <th style="width:130px">Stage</th>
             <th style="min-width:250px">Billing</th>
-            <th style="width:260px">Billing email</th>
+            <th style="width:260px">Accountant email</th>
             <th style="width:230px">Base price / month</th>
             <th style="min-width:460px">One-time quote</th>
           </tr>
@@ -397,7 +397,7 @@ function emailCell(deal) {
   const input = document.createElement('input');
   input.type = 'email';
   input.className = 'mono';
-  input.value = e.billingPocEmail ?? '';
+  input.value = e.accountantEmail ?? '';
   input.placeholder = e.contactEmail ? 'uses contact email' : 'no email in HubSpot';
   const saveBtn = el('button', 'btn secondary small', 'Save');
   saveBtn.type = 'button';
@@ -405,8 +405,8 @@ function emailCell(deal) {
     const email = input.value.trim();
     const done = busy(saveBtn, 'Saving');
     try {
-      await postJson('/admin/pricing/billing-email', { dealId: deal.dealId, email });
-      toast('ok', deal.dealName + ': billing email ' + (email ? 'saved to HubSpot' : 'cleared — quotes go to the contact\\'s email'));
+      await postJson('/admin/pricing/accountant-email', { dealId: deal.dealId, email });
+      toast('ok', deal.dealName + ': accountant email ' + (email ? 'saved to HubSpot' : 'cleared — quotes go to the contact\\'s email'));
       await loadDeals();
     } catch (err) {
       toast('err', deal.dealName + ': ' + err.message, true);
@@ -416,10 +416,10 @@ function emailCell(deal) {
   row.appendChild(input);
   row.appendChild(saveBtn);
   td.appendChild(row);
-  if (e.source === 'billing_poc') {
-    td.appendChild(el('div', 'sub', 'Quotes go here (Billing POC)'));
+  if (e.source === 'accountant') {
+    td.appendChild(el('div', 'sub', 'Quotes go here (Accountant Email)'));
   } else if (e.source === 'contact') {
-    td.appendChild(el('div', 'sub', (e.billingPocEmail ? 'Not a valid email — ignored. ' : '') + 'Quotes go to ' + e.contactEmail + ' (HubSpot contact)'));
+    td.appendChild(el('div', 'sub', (e.accountantEmail ? 'Not a valid email — ignored. ' : '') + 'Quotes go to ' + e.contactEmail + ' (HubSpot contact)'));
   } else {
     td.appendChild(el('div', 'sub warn', 'No email anywhere — quotes cannot be sent until one is entered'));
   }

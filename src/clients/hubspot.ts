@@ -36,10 +36,10 @@ export interface HubspotDeal {
   dealId: string;
   dealName: string;
   billingPeriod: string | null;
-  contactEmail: string; // Zoho customer identity: the associated contact, or the Billing POC when there is no contact
+  contactEmail: string; // Zoho customer identity: the associated contact, or the Accountant Email when there is no contact
   contactName: string;
   contactPhone: string | null;
-  // Where quotes and invoices are emailed: the deal's Billing POC Email
+  // Where quotes and invoices are emailed: the deal's Accountant Email
   // when it is a real address, else contactEmail. Optional only so test
   // fixtures stay valid; the fetch always sets it.
   billingEmail?: string;
@@ -70,7 +70,7 @@ interface HubspotDealResponse {
     dealname?: string;
     billing_cycle?: string;
     next_renewal_date?: string;
-    billing_poc_email?: string | null;
+    accountant_email?: string | null;
     billing_poc_name?: string | null;
   };
   associations?: {
@@ -104,7 +104,7 @@ interface HubspotContactResponse {
   };
 }
 
-// The live Billing POC Email field holds junk on some deals ("NA", "--", a
+// Free-text email fields hold junk on some live deals ("NA", "--", a
 // phone number); anything that is not shaped like an address is ignored.
 export function asEmail(value: string | null | undefined): string | null {
   const trimmed = (value ?? "").trim();
@@ -113,7 +113,7 @@ export function asEmail(value: string | null | undefined): string | null {
 
 export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<HubspotDeal> {
   const deal = (await hubspotFetch(
-    `/crm/v3/objects/deals/${dealId}?properties=dealname,billing_cycle,next_renewal_date,billing_poc_email,billing_poc_name&associations=line_items,contacts`,
+    `/crm/v3/objects/deals/${dealId}?properties=dealname,billing_cycle,next_renewal_date,accountant_email,billing_poc_name&associations=line_items,contacts`,
   )) as HubspotDealResponse;
 
   const lineItemIds = deal.associations?.["line items"]?.results.map((r) => r.id) ?? [];
@@ -135,14 +135,14 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
   ]);
 
   // The associated contact is the Zoho customer identity; the deal's
-  // Billing POC Email is where documents are sent (it differs from the
+  // Accountant Email is where documents are sent (it differs from the
   // contact on several live deals). A deal with no contact can still be
-  // billed when the POC email is set.
+  // billed when the Accountant Email is set.
   const contactEmail = asEmail(contact?.properties.email);
-  const billingPocEmail = asEmail(deal.properties.billing_poc_email);
-  const identityEmail = contactEmail ?? billingPocEmail;
+  const accountantEmail = asEmail(deal.properties.accountant_email);
+  const identityEmail = contactEmail ?? accountantEmail;
   if (!identityEmail) {
-    throw new Error(`HubSpot deal ${dealId} has no associated contact email and no valid Billing POC Email`);
+    throw new Error(`HubSpot deal ${dealId} has no associated contact email and no valid Accountant Email`);
   }
   const contactName = contact
     ? [contact.properties.firstname, contact.properties.lastname].filter(Boolean).join(" ")
@@ -162,7 +162,7 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
     contactEmail: identityEmail,
     contactName,
     contactPhone: contact?.properties.phone ?? null,
-    billingEmail: billingPocEmail ?? identityEmail,
+    billingEmail: accountantEmail ?? identityEmail,
     lineItems: lineItems.map((item) => parseLineItem(dealId, item)),
   };
 }
@@ -422,35 +422,35 @@ export async function addLineItemToDeal(
   });
 }
 
-// Admin page: set (or clear, with null) the deal's Billing POC Email — the
+// Admin page: set (or clear, with null) the deal's Accountant Email — the
 // address quotes and invoices are emailed to.
-export async function updateDealBillingPocEmail(dealId: string, email: string | null): Promise<void> {
+export async function updateDealAccountantEmail(dealId: string, email: string | null): Promise<void> {
   await hubspotFetch(`/crm/v3/objects/deals/${dealId}`, {
     method: "PATCH",
-    body: JSON.stringify({ properties: { billing_poc_email: email ?? "" } }),
+    body: JSON.stringify({ properties: { accountant_email: email ?? "" } }),
   });
 }
 
 export interface DealEmails {
-  billingPocEmail: string | null; // raw HubSpot value, junk included, so the page can show what is there
+  accountantEmail: string | null; // raw HubSpot value, junk included, so the page can show what is there
   contactEmail: string | null; // the primary associated contact's email
 }
 
-// Admin page: every deal's Billing POC Email and primary contact email in
+// Admin page: every deal's Accountant Email and primary contact email in
 // three batch calls (deals, deal→contact associations, contacts).
 export async function fetchVaDealEmails(dealIds: string[]): Promise<Map<string, DealEmails>> {
-  const emails = new Map<string, DealEmails>(dealIds.map((id) => [id, { billingPocEmail: null, contactEmail: null }]));
+  const emails = new Map<string, DealEmails>(dealIds.map((id) => [id, { accountantEmail: null, contactEmail: null }]));
   if (dealIds.length === 0) {
     return emails;
   }
 
   const deals = (await hubspotFetch("/crm/v3/objects/deals/batch/read", {
     method: "POST",
-    body: JSON.stringify({ inputs: dealIds.map((id) => ({ id })), properties: ["billing_poc_email"] }),
-  })) as { results: Array<{ id: string; properties: { billing_poc_email?: string | null } }> };
+    body: JSON.stringify({ inputs: dealIds.map((id) => ({ id })), properties: ["accountant_email"] }),
+  })) as { results: Array<{ id: string; properties: { accountant_email?: string | null } }> };
   for (const deal of deals.results) {
     const entry = emails.get(deal.id);
-    if (entry) entry.billingPocEmail = deal.properties.billing_poc_email?.trim() || null;
+    if (entry) entry.accountantEmail = deal.properties.accountant_email?.trim() || null;
   }
 
   const associations = (await hubspotFetch("/crm/v4/associations/deals/contacts/batch/read", {

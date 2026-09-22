@@ -736,10 +736,12 @@ state machine.
   contact phone is the fallback, also when the lookup fails —
   `src/steps/whatsappRecipient.ts`). Email via Zoho Books
   `POST /estimates|invoices/{id}/email` (`to_mail_ids` = the deal's
-  **Billing POC Email** when it is a real address, else the primary
-  contact's `email` — `HubspotDeal.billingEmail`; the contact stays the
-  Zoho customer identity, and a deal with no contact is billable when the
-  POC email is set; explicit subject/body carrying the Razorpay link),
+  **Accountant Email** (`accountant_email`, added 2026-09-22) when it is a
+  real address, else the primary contact's `email` —
+  `HubspotDeal.billingEmail`; the Billing POC Email field is not used; the
+  contact stays the Zoho customer identity, and a deal with no contact is
+  billable when the Accountant Email is set; explicit subject/body
+  carrying the Razorpay link),
   best-effort: `estimate_email_sent` / `invoice_email_sent` / `email_error`.
   **Not yet exercised live** — scope and PDF-attachment behaviour to confirm.
 - **Settlement** (`src/steps/settleRenewalPayment.ts` — the Razorpay
@@ -781,8 +783,8 @@ state machine.
   any cycle started this month) with **Paid through Yes Bank** and
   **Record manual payment** (`POST /admin/pricing/record-payment`; both
   take the real payment date, which becomes HubSpot's Date Paid). The
-  Clients table shows and edits each deal's Billing POC Email in place
-  (`POST /admin/pricing/billing-email` → PATCH on the HubSpot deal; blank
+  Clients table shows and edits each deal's Accountant Email in place
+  (`POST /admin/pricing/accountant-email` → PATCH on the HubSpot deal; blank
   clears it; junk values such as "NA" are shown as ignored).
   One-time quote column and "One-time quotes" table — see §3.7c. Still
   unauthenticated — business decision.

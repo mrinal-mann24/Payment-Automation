@@ -125,6 +125,14 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (accountant email) — The email source is the new HubSpot deal
+  field **Accountant Email** (`accountant_email`, empty on every deal
+  today), not Billing POC Email, which the team must not edit. Quotes and
+  invoices go to the Accountant Email when it is a valid address, else to
+  the contact's email; the admin page column is now "Accountant email" and
+  writes to that field (`POST /admin/pricing/accountant-email`). Until the
+  team fills it in, every deal falls back to the contact's email — Leon and
+  Root Botanie have neither and still cannot be emailed.
 - 2026-09-22 (admin tweaks) — "Paid through Yes Bank" now opens an inline
   form with the real payment date (+ narration) instead of a prompt, so
   HubSpot's Date Paid is the day the money arrived, not the day the
