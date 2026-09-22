@@ -4,7 +4,8 @@ export interface AdditionCharge {
   id: string;
   hubspot_deal_id: string;
   amount: number;
-  description: string;
+  description: string; // the service name shown as the Zoho line item
+  narration: string | null; // optional line under the service name
   zoho_estimate_id: string | null;
   zoho_estimate_number: string | null;
   zoho_estimate_total: number | null;
@@ -15,6 +16,11 @@ export interface AdditionCharge {
   zoho_invoice_number: string | null;
   invoice_step_status: "pending" | "done" | "failed";
   periskope_payment_confirmed_sent: boolean;
+  periskope_sent: boolean;
+  periskope_skip_reason: string | null;
+  estimate_email_sent: boolean;
+  invoice_email_sent: boolean;
+  email_error: string | null;
   error_log: unknown;
   created_at: string;
   updated_at: string;

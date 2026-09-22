@@ -45,6 +45,7 @@ const baseJob = {
   reminder_3_sent_at: null,
   reminder_skip_reason: null,
   service_period_start: null,
+  term_months: null,
   billed_price: null,
   paid_at: null,
   payment_method: null,

@@ -45,6 +45,7 @@ const paidJob = {
   reminder_3_sent_at: null,
   reminder_skip_reason: null,
   service_period_start: "2026-10-01",
+  term_months: 1,
   billed_price: 5000,
   paid_at: "2026-10-03T04:00:00Z",
   payment_method: "razorpay",

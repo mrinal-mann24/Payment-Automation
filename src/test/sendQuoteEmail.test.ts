@@ -45,6 +45,7 @@ const baseJob = {
   reminder_3_sent_at: null,
   reminder_skip_reason: null,
   service_period_start: "2026-10-01",
+  term_months: 1,
   billed_price: 5000,
   paid_at: null,
   payment_method: null,

@@ -28,6 +28,7 @@ export interface RenewalJob {
   reminder_3_sent_at: string | null;
   reminder_skip_reason: string | null;
   service_period_start: string | null;
+  term_months: number | null; // 1 = calendar month, 3 = quarterly, 6 = half-yearly; null = legacy row
   billed_price: number | null;
   paid_at: string | null;
   payment_method: string | null;
