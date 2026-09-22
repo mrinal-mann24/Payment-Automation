@@ -27,6 +27,18 @@ export interface RenewalJob {
   reminder_2_sent_at: string | null;
   reminder_3_sent_at: string | null;
   reminder_skip_reason: string | null;
+  service_period_start: string | null;
+  billed_price: number | null;
+  paid_at: string | null;
+  payment_method: string | null;
+  payment_amount: number | null;
+  payment_date: string | null;
+  payment_narration: string | null;
+  payment_reference: string | null;
+  hubspot_line_item_id: string | null;
+  estimate_email_sent: boolean;
+  invoice_email_sent: boolean;
+  email_error: string | null;
   error_log: unknown;
   created_at: string;
   updated_at: string;
