@@ -81,20 +81,21 @@ export async function findRenewalJobByEstimateNumber(
   return data as RenewalJob | null;
 }
 
-// Monthly cycles of the given month (YYYY-MM) whose quote + link went out
-// but which have not been paid — the only rows reminders are ever sent for.
-// Legacy (due-date keyed) rows never match a month key, so non-monthly
-// customers get no monthly reminders.
-export async function findUnpaidMonthlyJobs(supabase: SupabaseClient, monthKey: string): Promise<RenewalJob[]> {
+// Billing cycles (monthly or term — anything with a service period) whose
+// quote + link went out but which have not been paid: the only rows
+// reminders are ever sent for. The cron decides per row, from its start
+// date, whether a reminder is due today. Legacy due-date rows have no
+// service period and are never reminded.
+export async function findUnpaidCycleJobs(supabase: SupabaseClient): Promise<RenewalJob[]> {
   const { data, error } = await supabase
     .from("renewal_jobs")
     .select("*")
-    .eq("billing_period", monthKey)
+    .not("service_period_start", "is", null)
     .eq("razorpay_step_status", "done")
     .is("paid_at", null);
 
   if (error) {
-    throw new Error(`Failed to look up unpaid monthly renewal_jobs rows: ${error.message}`);
+    throw new Error(`Failed to look up unpaid renewal_jobs cycles: ${error.message}`);
   }
 
   return (data ?? []) as RenewalJob[];

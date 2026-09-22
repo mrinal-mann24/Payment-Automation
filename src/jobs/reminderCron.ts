@@ -1,22 +1,31 @@
 import { getSupabaseClient } from "../clients/supabase.js";
 import { fetchPaymentLink } from "../clients/razorpay.js";
-import { findUnpaidMonthlyJobs, type ReminderStage, type RenewalJob } from "../repositories/renewalJobs.js";
+import { findUnpaidCycleJobs, type ReminderStage, type RenewalJob } from "../repositories/renewalJobs.js";
 import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
 import { settleRenewalPayment } from "../steps/settleRenewalPayment.js";
-import { billingMonthKey, istDayOfMonth, istToday } from "../utils/billingCycle.js";
+import { daysBetween, istToday } from "../utils/billingCycle.js";
 
-// Reminders for an unpaid monthly cycle go out on the 5th, 7th and 9th of
-// the month being billed. Each stage keeps a one-day grace window so a
-// single missed tick is recovered the next day; a stage is never sent
+// Reminders for an unpaid cycle go out on days 5, 7 and 9 of the cycle,
+// counted from the day it started: the 5th/7th/9th of the month for a
+// monthly cycle (quoted on the 1st), 4/6/8 days after the quote for a
+// quarterly or half-yearly one. Each stage keeps a one-day grace window so
+// a single missed tick is recovered the next day; a stage is never sent
 // twice (reminder_N_sent_at) and only one stage fires per run.
-export function reminderStageForDay(day: number): ReminderStage | null {
-  if (day === 5 || day === 6) return 1;
-  if (day === 7 || day === 8) return 2;
-  if (day === 9 || day === 10) return 3;
+export function reminderStageForDay(dayOfCycle: number): ReminderStage | null {
+  if (dayOfCycle === 5 || dayOfCycle === 6) return 1;
+  if (dayOfCycle === 7 || dayOfCycle === 8) return 2;
+  if (dayOfCycle === 9 || dayOfCycle === 10) return 3;
   return null;
 }
 
-// Same one-number-sends-many pacing as the monthly generator.
+export function reminderStageForJob(job: RenewalJob, today: string): ReminderStage | null {
+  if (!job.service_period_start) {
+    return null; // legacy row: no cycle, no reminders
+  }
+  return reminderStageForDay(daysBetween(job.service_period_start, today) + 1);
+}
+
+// Same one-number-sends-many pacing as the cycle generator.
 const DEFAULT_PAUSE_MS = 5000;
 
 function sleep(ms: number): Promise<void> {
@@ -31,23 +40,18 @@ export async function runOverdueReminderCheck(
   now: Date = new Date(),
   options: { pauseMs?: number } = {},
 ): Promise<void> {
-  const stage = reminderStageForDay(istDayOfMonth(now));
-  if (!stage) {
-    return;
-  }
-
-  const monthKey = billingMonthKey(now);
+  const today = istToday(now);
   const pauseMs = options.pauseMs ?? DEFAULT_PAUSE_MS;
   const supabase = getSupabaseClient();
-  const jobs = await findUnpaidMonthlyJobs(supabase, monthKey);
-  console.log(`[reminderCron] ${jobs.length} unpaid ${monthKey} cycle(s) to check for reminder stage ${stage}`);
+  const unpaid = await findUnpaidCycleJobs(supabase);
+  const due = unpaid.flatMap((job) => {
+    const stage = reminderStageForJob(job, today);
+    return stage && !stageAlreadySent(job, stage) ? [{ job, stage }] : [];
+  });
+  console.log(`[reminderCron] ${today}: ${unpaid.length} unpaid cycle(s), ${due.length} due a reminder`);
 
   let attempted = 0;
-  for (const job of jobs) {
-    if (stageAlreadySent(job, stage)) {
-      continue;
-    }
-
+  for (const { job, stage } of due) {
     if (attempted > 0 && pauseMs > 0) {
       await sleep(pauseMs);
     }
@@ -65,7 +69,7 @@ export async function runOverdueReminderCheck(
           await settleRenewalPayment(supabase, job, {
             method: "razorpay",
             amount: null,
-            paymentDate: istToday(now),
+            paymentDate: today,
             narration: "payment found on Razorpay by the reminder check (webhook not received)",
             reference: null,
           });
