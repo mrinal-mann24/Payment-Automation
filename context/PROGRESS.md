@@ -125,6 +125,12 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (UI) — Admin page redesigned (`src/routes/pricingAdminPage.ts`)
+  along the 2026 dense-UI guidance: ledger-style summary strip, visible
+  table grid with monospaced numerals, fluid type via clamp(), stage IDs
+  shown as names, toasts + in-button progress for every action, a "Reduce
+  motion" toggle that also honours prefers-reduced-motion, no blur/glass.
+  Same endpoints, payloads and confirm dialogs as before; rendered live.
 - 2026-09-22 (later) — Gap fixes against the business flowchart: quarterly
   and half-yearly clients were outside the flow, one-time quotes went to a
   personal number with no email, and "Add One-Time Payment" was misnamed.
