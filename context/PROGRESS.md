@@ -126,6 +126,11 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (quantity = months) — The line item's Quantity now counts as
+  months too: the cycle is the longer of Term and Quantity, so a monthly
+  item with quantity 3 is quoted as a 3-month cycle at price × quantity
+  (`classifyDeal`). Quantity 12+ or a non-whole quantity goes to the
+  legacy flow. `src/utils/monthlyEligibility.ts`, tests.
 - 2026-09-22 (email list) — The team reverted `accountant_email` to a
   plain-text field, so several recipients now live in that one field as a
   comma-separated list (`parseEmailList`: commas, semicolons or spaces;

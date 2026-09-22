@@ -6,11 +6,12 @@ cycle-billed customer; the legacy due-date flow (`step1.md`–`step4.md`) is
 unchanged for yearly customers and deals with no usable line item.
 
 ## 1. Decisions (confirmed by the business, 2026-09-21 and 2026-09-22)
-- **Cycle length from the line item's Term.** The latest HubSpot line item's
-  `hs_recurring_billing_period` decides: any whole number of months under
-  a year is a cycle of that length (`P1M` monthly, `P3M` quarterly, `P6M`
-  half-yearly, `P7M` every 7 months …). A year or longer stays on the
-  legacy due-date flow.
+- **Cycle length from the line item's Term and Quantity.** The latest
+  HubSpot line item decides: the cycle is the longer of its term
+  (`hs_recurring_billing_period`) and its quantity — `P1M` × 1 monthly,
+  `P1M` × 3 or `P3M` × 1 quarterly, `P6M` half-yearly, `P7M` × 7 every
+  7 months … (quantity as months confirmed 2026-09-22). A year or longer
+  stays on the legacy due-date flow.
 - **Quote date from the deal's Next Renewal Date.** A client is quoted on
   HubSpot's `next_renewal_date`, for one cycle length from that day, at the
   `client_pricing` base price (monthly) or what they paid last time (terms:
@@ -44,7 +45,7 @@ unchanged for yearly customers and deals with no usable line item.
 - **Admin auth:** left open (business decision, see `ARCHITECTURE.md` §3.7c).
 
 ## 2. Requirements (EARS)
-- REQ-6.1 WHEN a deal's latest line item term is under a year and
+- REQ-6.1 WHEN a deal's latest line item term and quantity are both under a year and
   its Next Renewal Date is today or within the last three days, the system
   SHALL create one `renewal_jobs` row keyed `(hubspot_deal_id, <that date>)`,
   a Zoho estimate whose single line reads **Virtual Accounting** with

@@ -72,6 +72,32 @@ describe("classifyDeal — cycle from the line item term, date from the deal's N
     expect(result).toEqual({ kind: "cycle", months: 3, due: true, periodStart: "2026-10-09", amount: 39000, latest: quarterly() });
   });
 
+  it("a monthly-term item with quantity 3 is a 3-month cycle at price × quantity", () => {
+    const threeMonths = item({ id: "li-3", billingPeriodTerm: "P1M", quantity: 3, price: 10000 });
+    expect(classifyDeal(deal("2026-10-01", [threeMonths]), "2026-10-01")).toEqual({
+      kind: "cycle",
+      months: 3,
+      due: true,
+      periodStart: "2026-10-01",
+      amount: 30000,
+      latest: threeMonths,
+    });
+  });
+
+  it("a quantity of 12 or more months is left to the due-date flow like a yearly term", () => {
+    expect(classifyDeal(deal("2026-10-01", [item({ quantity: 12 })]), "2026-10-01")).toMatchObject({
+      kind: "none",
+      reason: expect.stringContaining("year or longer"),
+    });
+  });
+
+  it("is not billed when the quantity is not a whole number of months", () => {
+    expect(classifyDeal(deal("2026-10-01", [item({ quantity: 1.5 })]), "2026-10-01")).toMatchObject({
+      kind: "none",
+      reason: expect.stringContaining("whole number"),
+    });
+  });
+
   it("uses price × quantity as the amount for a term (the live monthly/P6M rows)", () => {
     const sixMonths = item({ id: "li-6", billingPeriodTerm: "P6M", quantity: 6, price: 3500 });
     expect(classifyDeal(deal("2026-10-01", [sixMonths]), "2026-10-01")).toMatchObject({ kind: "cycle", months: 6, amount: 21000 });
@@ -104,7 +130,7 @@ describe("classifyDeal — not billed by cycles", () => {
     for (const term of ["P1Y", "P12M"]) {
       expect(classifyDeal(deal("2026-10-01", [item({ billingPeriodTerm: term })]), "2026-10-01")).toMatchObject({
         kind: "none",
-        reason: expect.stringMatching(/yearly/i),
+        reason: expect.stringMatching(/year or longer/i),
       });
     }
   });

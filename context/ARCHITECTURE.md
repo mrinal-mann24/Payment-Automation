@@ -683,14 +683,16 @@ existing steps; there is no new table and no second state machine.
   /crm/v4/associations/deals/line_items/batch/read` + `POST
   /crm/v3/objects/line_items/batch/read` chunked by 100). Two inputs, both
   from HubSpot:
-  - the **cycle length** from the latest line item's Term
-    (`hs_recurring_billing_period`; latest = max `billing_term_end_date`,
-    undated items ignored, a tie with different terms fails closed):
-    any whole number of months under a year (`P1M`, `P3M`, `P6M`, `P7M`
-    …) → `kind: "cycle"` for that many months (decision 2026-09-22: no
-    "unsupported" terms); a year or longer (`P1Y` / `P12M` / `P18M`), no
-    usable term, no dated item, unreadable → `none`, the legacy due-date
-    flow (§3.1).
+  - the **cycle length** from the latest line item's Term and Quantity
+    (`hs_recurring_billing_period`, `quantity`; latest = max
+    `billing_term_end_date`, undated items ignored, a tie with different
+    terms fails closed): the cycle is the longer of the two — a P1M item
+    with quantity 3 is a 3-month cycle (decision 2026-09-22), the team's
+    P7M × 7 entry is 7 months, P3M × 1 is 3. Any whole number of months
+    under a year → `kind: "cycle"` (decision 2026-09-22: no "unsupported"
+    terms); a year or longer (`P1Y` / `P12M` / quantity 12), a non-whole
+    quantity, no usable term, no dated item, unreadable → `none`, the
+    legacy due-date flow (§3.1).
   - the **quote date** from the deal's **Next Renewal Date**
     (`next_renewal_date`, decision 2026-09-22): due once it is ≤ today.
     Blank, or HubSpot's `1970-01-01` placeholder, means never due and the

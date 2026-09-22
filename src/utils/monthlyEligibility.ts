@@ -70,12 +70,22 @@ export function classifyDeal(
   }
 
   const term = latest.billingPeriodTerm ?? "not set";
-  const months = termMonths(latest.billingPeriodTerm);
-  if (months === null) {
+  const termLength = termMonths(latest.billingPeriodTerm);
+  if (termLength === null) {
     return { kind: "none", reason: `latest line item has no usable term (${term})` };
   }
+  // The quantity is a number of months too (decision 2026-09-22: a
+  // monthly-term item with quantity 3 is a 3-month cycle); the team also
+  // enters a 7-month term as P7M × 7, so the cycle is the longer of the two.
+  const months = Math.max(termLength, latest.quantity);
+  if (!Number.isInteger(months) || months < 1) {
+    return { kind: "none", reason: `quantity ${latest.quantity} is not a whole number of months` };
+  }
   if (months >= 12) {
-    return { kind: "none", reason: `yearly or longer term (${term}) is left to the due-date flow` };
+    return {
+      kind: "none",
+      reason: `a year or longer (term ${term}, quantity ${latest.quantity}) is left to the due-date flow`,
+    };
   }
 
   const base = {
