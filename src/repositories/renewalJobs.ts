@@ -510,13 +510,13 @@ export async function markReminderSkipped(
   }
 }
 
-// What the admin page shows per deal: every unpaid cycle plus the current
-// month's, newest first.
+// What the admin page shows per deal: every unpaid cycle plus any cycle
+// (monthly or term) that started this month, newest first.
 export async function findAdminCycleJobs(supabase: SupabaseClient, currentMonthKey: string): Promise<RenewalJob[]> {
   const { data, error } = await supabase
     .from("renewal_jobs")
     .select("*")
-    .or(`paid_at.is.null,billing_period.eq.${currentMonthKey}`)
+    .or(`paid_at.is.null,billing_period.eq.${currentMonthKey},service_period_start.gte.${currentMonthKey}-01`)
     .order("created_at", { ascending: false });
 
   if (error) {

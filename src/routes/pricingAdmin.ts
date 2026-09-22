@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSupabaseClient } from "../clients/supabase.js";
 import { fetchVaDealsWithLineItems } from "../clients/hubspot.js";
 import { generateRenewalQuote, QuoteNotDueError } from "../jobs/generateRenewalQuote.js";
+import { listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
 import { upsertClientPricing } from "../repositories/clientPricing.js";
 import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
 import { createAdditionCharge } from "../steps/createAdditionCharge.js";
@@ -71,15 +72,48 @@ function billingView(classification: DealClassification, monthKey: string, jobs:
   };
 }
 
+// One-time quotes: PAID once the Razorpay webhook has converted the invoice.
+function additionView(charge: AdditionCharge, dealNames: Map<string, string>) {
+  const errorLog = charge.error_log as { step?: string; message?: string } | null;
+  return {
+    id: charge.id,
+    dealId: charge.hubspot_deal_id,
+    dealName: dealNames.get(charge.hubspot_deal_id) ?? charge.hubspot_deal_id,
+    service: charge.description,
+    narration: charge.narration,
+    amount: charge.amount,
+    quoteNumber: charge.zoho_estimate_number,
+    quoteTotal: charge.zoho_estimate_total,
+    shortUrl: charge.razorpay_short_url,
+    invoiceNumber: charge.zoho_invoice_number,
+    status:
+      charge.status === "failed"
+        ? "failed"
+        : charge.invoice_step_status === "done"
+          ? "paid"
+          : charge.status === "done"
+            ? "payment_pending"
+            : "unpaid",
+    whatsappSent: charge.periskope_sent,
+    whatsappSkipReason: charge.periskope_skip_reason,
+    emailSent: charge.estimate_email_sent,
+    invoiceEmailSent: charge.invoice_email_sent,
+    emailError: charge.email_error,
+    issue: errorLog?.message ?? null,
+    createdAt: charge.created_at,
+  };
+}
+
 pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Response) => {
   try {
     const supabase = getSupabaseClient();
     const cycle = currentBillingCycle();
     const today = istToday();
-    const [deals, pricing, jobs] = await Promise.all([
+    const [deals, pricing, jobs, additions] = await Promise.all([
       fetchVaDealsWithLineItems(),
       supabase.from("client_pricing").select("*"),
       findAdminCycleJobs(supabase, cycle.key),
+      listRecentAdditionCharges(supabase),
     ]);
     if (pricing.error) throw new Error(pricing.error.message);
 
@@ -101,9 +135,11 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
       };
     });
 
+    const dealNames = new Map(deals.map((deal) => [deal.dealId, deal.dealName]));
     res.status(200).json({
       cycle: { key: cycle.key, narration: cycle.period.narration, today },
       deals: result,
+      additions: additions.map((charge) => additionView(charge, dealNames)),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

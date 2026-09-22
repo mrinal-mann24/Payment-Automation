@@ -15,12 +15,12 @@ export const pricingAdminHtml = `<!doctype html>
   button { padding: 0.4rem 0.8rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
   .save-btn { background: #2563eb; color: white; }
   .send-btn { background: #16a34a; color: white; }
+  .quote-btn { background: #2563eb; color: white; margin-top: 0.4rem; }
   .bank-btn { background: #0f766e; color: white; }
   .manual-btn { background: #7c3aed; color: white; }
   .cancel-btn { background: #e5e7eb; color: #111; }
   button:disabled { opacity: 0.5; cursor: default; }
-  .addition-cell { display: flex; gap: 0.4rem; align-items: center; }
-  .addition-cell input[type=number] { width: 90px; }
+  .addition-cell { display: grid; grid-template-columns: 90px 1fr 1fr auto; gap: 0.4rem; align-items: center; }
   .status { font-size: 0.8rem; margin-left: 0.5rem; }
   .status.ok { color: #16a34a; }
   .status.err { color: #dc2626; }
@@ -29,9 +29,12 @@ export const pricingAdminHtml = `<!doctype html>
   .badge.paid { background: #dcfce7; color: #166534; }
   .badge.payment_pending { background: #fef3c7; color: #92400e; }
   .badge.unpaid { background: #fee2e2; color: #991b1b; }
+  .badge.failed { background: #fee2e2; color: #991b1b; }
   .badge.monthly { background: #dbeafe; color: #1e40af; }
+  .badge.term { background: #e0e7ff; color: #3730a3; }
+  .badge.unsupported { background: #fef3c7; color: #92400e; }
   .badge.other { background: #e5e7eb; color: #374151; }
-  .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
   .payment-form { display: grid; grid-template-columns: 110px 140px 120px 1fr 140px auto auto; gap: 0.4rem; align-items: center; margin-top: 0.5rem; }
   .warn { color: #b45309; font-size: 0.8rem; grid-column: 1 / -1; }
 </style>
@@ -44,10 +47,10 @@ export const pricingAdminHtml = `<!doctype html>
     <tr>
       <th>Deal</th>
       <th>Stage</th>
-      <th style="width:220px">Billing</th>
-      <th style="width:140px">Base price</th>
+      <th style="width:260px">Billing</th>
+      <th style="width:140px">Base price (monthly)</th>
       <th style="width:120px"></th>
-      <th style="width:340px">Addition (amount + description)</th>
+      <th style="width:420px">One-time quote (amount · service · narration)</th>
     </tr>
   </thead>
   <tbody id="deals-body"></tbody>
@@ -59,7 +62,7 @@ export const pricingAdminHtml = `<!doctype html>
   <thead>
     <tr>
       <th>Deal</th>
-      <th style="width:90px">Cycle</th>
+      <th style="width:110px">Cycle</th>
       <th style="width:120px">Status</th>
       <th>Quote</th>
       <th>Payment</th>
@@ -68,6 +71,22 @@ export const pricingAdminHtml = `<!doctype html>
     </tr>
   </thead>
   <tbody id="cycles-body"></tbody>
+</table>
+
+<h2 id="additions-heading" style="display:none">One-time quotes</h2>
+<p id="additions-subtitle" class="subtitle" style="display:none">Sent to the client's WhatsApp group and by email. PAID once the Razorpay payment arrives and the invoice is generated.</p>
+<table id="additions-table" style="display:none">
+  <thead>
+    <tr>
+      <th>Deal</th>
+      <th>Service</th>
+      <th style="width:110px">Amount</th>
+      <th>Quote</th>
+      <th style="width:130px">Status</th>
+      <th>Delivery</th>
+    </tr>
+  </thead>
+  <tbody id="additions-body"></tbody>
 </table>
 
 <script>
@@ -93,6 +112,11 @@ async function postJson(url, body) {
   return data;
 }
 
+function deliverySummary(result) {
+  return 'WhatsApp ' + (result.periskopeSent ? 'sent' : 'skipped: ' + result.periskopeSkipReason) +
+    ' · email ' + (result.emailSent ? 'sent' : 'not sent: ' + result.emailError);
+}
+
 function settlementSummary(result) {
   const parts = [];
   parts.push(result.recordedPayment ? 'Marked PAID' : 'Already paid via ' + result.paidVia);
@@ -102,6 +126,41 @@ function settlementSummary(result) {
   parts.push(result.hubspotDone ? 'HubSpot updated' : 'HubSpot pending');
   if (result.errors && result.errors.length) parts.push('OUTSTANDING: ' + result.errors.join('; '));
   return parts.join(' · ');
+}
+
+function billingCell(deal) {
+  const td = document.createElement('td');
+  const b = deal.billing;
+  const badgeClass = b.kind === 'monthly' ? 'monthly' : b.kind === 'term' ? 'term' : b.kind === 'unsupported' ? 'unsupported' : 'other';
+  td.appendChild(el('span', 'badge ' + badgeClass, b.label));
+  if (b.kind === 'term') {
+    td.appendChild(el('div', 'muted', (b.due ? 'Due from ' : 'Next quote from ') + b.periodStart + ' · last paid ' + money(b.lastPaid)));
+  }
+  if (b.reason) td.appendChild(el('div', 'muted', b.reason));
+  if (b.due && !b.quoted) {
+    const actions = el('div', 'actions');
+    const quoteBtn = el('button', 'quote-btn', 'Quote now');
+    const status = el('span', 'status');
+    quoteBtn.onclick = async () => {
+      if (!confirm('Send the renewal quote for ' + deal.dealName + ' now (cycle ' + b.cycleKey + ')? It goes to the client\\'s WhatsApp group and email.')) return;
+      quoteBtn.disabled = true;
+      status.textContent = '';
+      try {
+        const result = await postJson('/admin/pricing/generate-quote', { dealId: deal.dealId });
+        status.textContent = 'Quote ' + result.zohoEstimateNumber + ' · ' + deliverySummary(result);
+        status.className = 'status ok';
+        await loadDeals();
+      } catch (err) {
+        status.textContent = err.message;
+        status.className = 'status err';
+        quoteBtn.disabled = false;
+      }
+    };
+    actions.appendChild(quoteBtn);
+    actions.appendChild(status);
+    td.appendChild(actions);
+  }
+  return td;
 }
 
 function renderDeals(data) {
@@ -114,16 +173,7 @@ function renderDeals(data) {
 
     tr.appendChild(el('td', null, deal.dealName));
     tr.appendChild(el('td', null, deal.dealStage));
-
-    const billingTd = document.createElement('td');
-    if (deal.billing.monthly) {
-      billingTd.appendChild(el('span', 'badge monthly', 'Monthly'));
-      if (deal.billing.due === false) billingTd.appendChild(el('div', 'muted', deal.billing.reason));
-    } else {
-      billingTd.appendChild(el('span', 'badge other', 'Not monthly'));
-      billingTd.appendChild(el('div', 'muted', deal.billing.reason));
-    }
-    tr.appendChild(billingTd);
+    tr.appendChild(billingCell(deal));
 
     const priceTd = document.createElement('td');
     const priceInput = document.createElement('input');
@@ -163,24 +213,31 @@ function renderDeals(data) {
     amountInput.type = 'number';
     amountInput.min = '0';
     amountInput.placeholder = 'Amount';
-    const descInput = document.createElement('input');
-    descInput.type = 'text';
-    descInput.placeholder = 'Description (e.g. monthly site visit)';
-    const sendBtn = el('button', 'send-btn', 'Send');
+    const serviceInput = document.createElement('input');
+    serviceInput.type = 'text';
+    serviceInput.placeholder = 'Service (e.g. site visit)';
+    const narrationInput = document.createElement('input');
+    narrationInput.type = 'text';
+    narrationInput.placeholder = 'Narration (optional)';
+    const sendBtn = el('button', 'send-btn', 'Send quote');
     const sendStatus = el('span', 'status');
     sendBtn.onclick = async () => {
       sendBtn.disabled = true;
       sendStatus.textContent = '';
       try {
         const amount = Number(amountInput.value);
-        const description = descInput.value.trim();
+        const service = serviceInput.value.trim();
+        const narration = narrationInput.value.trim();
         if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid amount');
-        if (!description) throw new Error('Enter a description');
-        const body = await postJson('/admin/pricing/send-addition', { dealId: deal.dealId, amount, description });
-        sendStatus.textContent = body.periskopeSent ? 'Sent' : 'Quote created, WhatsApp skipped: ' + body.periskopeSkipReason;
+        if (!service) throw new Error('Enter the service');
+        if (!confirm('Send a one-time quote of ' + money(amount) + ' for "' + service + '" to ' + deal.dealName + '? It goes to the client\\'s WhatsApp group and email.')) return;
+        const result = await postJson('/admin/pricing/send-addition', { dealId: deal.dealId, amount, service, narration });
+        sendStatus.textContent = 'Quote ' + result.zohoEstimateNumber + ' · ' + deliverySummary(result);
         sendStatus.className = 'status ok';
         amountInput.value = '';
-        descInput.value = '';
+        serviceInput.value = '';
+        narrationInput.value = '';
+        await loadDeals();
       } catch (err) {
         sendStatus.textContent = err.message;
         sendStatus.className = 'status err';
@@ -189,7 +246,8 @@ function renderDeals(data) {
       }
     };
     additionCell.appendChild(amountInput);
-    additionCell.appendChild(descInput);
+    additionCell.appendChild(serviceInput);
+    additionCell.appendChild(narrationInput);
     additionCell.appendChild(sendBtn);
     additionTd.appendChild(additionCell);
     additionTd.appendChild(sendStatus);
@@ -278,7 +336,7 @@ function renderCycles(data) {
   const tbody = document.getElementById('cycles-body');
   tbody.innerHTML = '';
   document.getElementById('cycles-subtitle').textContent =
-    'Current cycle ' + data.cycle.key + ' — ' + data.cycle.narration + '. Unpaid cycles from earlier months stay listed until paid.';
+    'Current month ' + data.cycle.key + ' — ' + data.cycle.narration + '. Quarterly and half-yearly cycles are keyed by the day they start. Unpaid cycles stay listed until paid.';
 
   let rows = 0;
   for (const deal of data.deals) {
@@ -315,7 +373,7 @@ function renderCycles(data) {
       if (cycle.status !== 'paid' && cycle.quoteNumber) {
         const actions = el('div', 'actions');
         const bankBtn = el('button', 'bank-btn', 'Paid through Yes Bank');
-        const manualBtn = el('button', 'manual-btn', 'Add One-Time Payment');
+        const manualBtn = el('button', 'manual-btn', 'Record manual payment');
         const status = el('span', 'status');
         bankBtn.onclick = async () => {
           if (!confirm('Mark ' + deal.dealName + ' (' + cycle.billingPeriod + ') as PAID through Yes Bank for ' + money(cycle.quoteTotal) + '?')) return;
@@ -352,8 +410,52 @@ function renderCycles(data) {
 
   if (rows === 0) {
     const tr = document.createElement('tr');
-    const td = el('td', 'muted', 'No billing cycles yet. Monthly quotes are generated on the 1st of each month.');
+    const td = el('td', 'muted', 'No billing cycles yet. Monthly quotes go out on the 1st; quarterly and half-yearly ones on the day the last term ends.');
     td.colSpan = 7;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
+function renderAdditions(data) {
+  const tbody = document.getElementById('additions-body');
+  tbody.innerHTML = '';
+
+  for (const quote of data.additions) {
+    const tr = document.createElement('tr');
+    tr.appendChild(el('td', null, quote.dealName));
+
+    const serviceTd = el('td', null, quote.service);
+    if (quote.narration) serviceTd.appendChild(el('div', 'muted', quote.narration));
+    serviceTd.appendChild(el('div', 'muted', new Date(quote.createdAt).toLocaleDateString('en-IN')));
+    tr.appendChild(serviceTd);
+
+    tr.appendChild(el('td', null, money(quote.amount)));
+
+    const quoteTd = el('td', null, (quote.quoteNumber || '—') + ' · ' + money(quote.quoteTotal));
+    if (quote.invoiceNumber) quoteTd.appendChild(el('div', 'muted', 'Invoice ' + quote.invoiceNumber));
+    tr.appendChild(quoteTd);
+
+    const statusTd = document.createElement('td');
+    statusTd.appendChild(el('span', 'badge ' + quote.status, quote.status.replace('_', ' ').toUpperCase()));
+    if (quote.issue) statusTd.appendChild(el('div', 'muted', quote.issue));
+    tr.appendChild(statusTd);
+
+    const deliveryTd = el('td', null,
+      'WhatsApp ' + (quote.whatsappSent ? 'sent' : 'not sent') +
+      ' · quote email ' + (quote.emailSent ? 'sent' : 'not sent') +
+      (quote.status === 'paid' ? ' · invoice email ' + (quote.invoiceEmailSent ? 'sent' : 'not sent') : ''));
+    if (quote.whatsappSkipReason && !quote.whatsappSent) deliveryTd.appendChild(el('div', 'muted', quote.whatsappSkipReason));
+    if (quote.emailError) deliveryTd.appendChild(el('div', 'muted', quote.emailError));
+    tr.appendChild(deliveryTd);
+
+    tbody.appendChild(tr);
+  }
+
+  if (data.additions.length === 0) {
+    const tr = document.createElement('tr');
+    const td = el('td', 'muted', 'No one-time quotes yet. Use the one-time quote column above to send one.');
+    td.colSpan = 6;
     tr.appendChild(td);
     tbody.appendChild(tr);
   }
@@ -366,12 +468,12 @@ async function loadDeals() {
 
   renderDeals(data);
   renderCycles(data);
+  renderAdditions(data);
 
   document.getElementById('loading').style.display = 'none';
-  document.getElementById('deals-table').style.display = '';
-  document.getElementById('cycles-heading').style.display = '';
-  document.getElementById('cycles-subtitle').style.display = '';
-  document.getElementById('cycles-table').style.display = '';
+  for (const id of ['deals-table', 'cycles-heading', 'cycles-subtitle', 'cycles-table', 'additions-heading', 'additions-subtitle', 'additions-table']) {
+    document.getElementById(id).style.display = '';
+  }
 }
 
 loadDeals().catch((err) => {
