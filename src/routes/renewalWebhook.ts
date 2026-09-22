@@ -3,11 +3,10 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { getSupabaseClient } from "../clients/supabase.js";
 import { config } from "../config.js";
-import { fetchDealStage, VA_ACTIVE_CUSTOMER_DEALSTAGES } from "../clients/hubspot.js";
-import { createZohoEstimate } from "../steps/createZohoEstimate.js";
-import { createRazorpayLink } from "../steps/createRazorpayLink.js";
-import { sendRenewalMessage } from "../steps/sendRenewalMessage.js";
-import { updateHubspotDeal } from "../steps/updateHubspotDeal.js";
+import { fetchDealStage, fetchVaDealsWithLineItems, VA_ACTIVE_CUSTOMER_DEALSTAGES } from "../clients/hubspot.js";
+import { runRenewalPipeline } from "../jobs/renewalPipeline.js";
+import { currentBillingCycle } from "../utils/billingCycle.js";
+import { classifyDeal, type DealClassification } from "../utils/monthlyEligibility.js";
 
 const renewalWebhookSchema = z.object({
   deal_id: z.string().min(1),
@@ -67,33 +66,28 @@ renewalWebhookRouter.post("/webhooks/renewal", async (req: Request, res: Respons
       return;
     }
 
-    const { zohoEstimateId, zohoEstimateNumber, billingPeriod } = await createZohoEstimate(
-      supabase,
-      dealId,
-    );
-    console.log(`[renewalWebhook] deal ${dealId} -> estimate ${zohoEstimateNumber} (${zohoEstimateId})`);
+    // Same classification as the daily tick: a monthly deal gets the current
+    // IST month's cycle (so this route doubles as "generate now" after the
+    // 1st-4th window); anything else runs the legacy due-date flow.
+    const cycle = currentBillingCycle();
+    const listed = (await fetchVaDealsWithLineItems()).find((deal) => deal.dealId === dealId);
+    const classification: DealClassification = listed
+      ? classifyDeal(listed, cycle.period.start)
+      : { monthly: false, reason: "deal is not in the active VA deal list" };
+    if (classification.monthly && !classification.due) {
+      console.log(`[renewalWebhook] deal ${dealId} rejected: ${classification.reason}`);
+      res.status(409).json({ error: "Monthly deal is not due for this month", reason: classification.reason });
+      return;
+    }
 
-    const { paymentLinkId, shortUrl } = await createRazorpayLink(supabase, dealId, billingPeriod);
-    console.log(`[renewalWebhook] deal ${dealId} -> payment link ${shortUrl} (${paymentLinkId})`);
-
-    const { sent, skipReason } = await sendRenewalMessage(supabase, dealId, billingPeriod);
+    const result = await runRenewalPipeline(supabase, dealId, classification.monthly ? cycle : undefined);
     console.log(
-      sent
-        ? `[renewalWebhook] deal ${dealId} -> WhatsApp quote message sent`
-        : `[renewalWebhook] deal ${dealId} -> WhatsApp message skipped: ${skipReason}`,
+      `[renewalWebhook] deal ${dealId} (${classification.monthly ? "monthly" : "legacy"}) -> estimate ${result.zohoEstimateNumber}, ` +
+        `link ${result.shortUrl}, WhatsApp ${result.periskopeSent ? "sent" : `skipped: ${result.periskopeSkipReason}`}, ` +
+        `email ${result.emailSent ? "sent" : `not sent: ${result.emailError}`}`,
     );
 
-    await updateHubspotDeal(supabase, dealId, billingPeriod);
-    console.log(`[renewalWebhook] deal ${dealId} -> HubSpot updated`);
-
-    res.status(200).json({
-      zohoEstimateId,
-      zohoEstimateNumber,
-      paymentLinkId,
-      shortUrl,
-      periskopeSent: sent,
-      periskopeSkipReason: skipReason,
-    });
+    res.status(200).json({ monthly: classification.monthly, ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[renewalWebhook] deal ${dealId} failed: ${message}`);

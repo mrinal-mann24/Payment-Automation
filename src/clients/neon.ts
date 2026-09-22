@@ -17,7 +17,9 @@ export interface DueRenewalDeal {
   dealName: string;
 }
 
-export async function findDealsWithRenewalDueToday(): Promise<DueRenewalDeal[]> {
+// `istDate` is today's IST calendar date (YYYY-MM-DD) — Neon's own
+// CURRENT_DATE would be evaluated in the database server's timezone.
+export async function findDealsWithRenewalDueToday(istDate: string): Promise<DueRenewalDeal[]> {
   // line_items is a per-cycle log (a deal can have many rows, one per past
   // due date), so "due today" must compare against each deal's latest cycle,
   // not any row that happens to equal today.
@@ -27,8 +29,8 @@ export async function findDealsWithRenewalDueToday(): Promise<DueRenewalDeal[]> 
      WHERE pipeline = $1
        AND deleted IS NULL
      GROUP BY record_id, deal_name
-     HAVING MAX(due_on) = CURRENT_DATE`,
-    [VA_PIPELINE_ID],
+     HAVING MAX(due_on) = $2::date`,
+    [VA_PIPELINE_ID, istDate],
   );
 
   return result.rows.map((row) => ({

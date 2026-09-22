@@ -94,6 +94,31 @@ export async function findOverdueUnpaidJobs(supabase: SupabaseClient): Promise<R
   return (data ?? []) as RenewalJob[];
 }
 
+// A legacy (due-date keyed) cycle for this deal that has a quote out but no
+// payment yet. The monthly generator skips such deals so a customer is
+// never asked to pay two quotes for overlapping periods.
+export async function findOpenLegacyJob(
+  supabase: SupabaseClient,
+  dealId: string,
+): Promise<RenewalJob | null> {
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .select("*")
+    .eq("hubspot_deal_id", dealId)
+    .is("service_period_start", null)
+    .is("paid_at", null)
+    .eq("zoho_step_status", "done")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to look up open legacy renewal_jobs row: ${error.message}`);
+  }
+
+  return data as RenewalJob | null;
+}
+
 export async function createRenewalJob(
   supabase: SupabaseClient,
   dealId: string,
