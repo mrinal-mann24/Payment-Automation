@@ -736,9 +736,11 @@ state machine.
   contact phone is the fallback, also when the lookup fails —
   `src/steps/whatsappRecipient.ts`). Email via Zoho Books
   `POST /estimates|invoices/{id}/email` (`to_mail_ids` = the deal's
-  **Accountant Email** (`accountant_email`, added 2026-09-22) when it is a
-  real address, else the primary contact's `email` —
-  `HubspotDeal.billingEmail`; the Billing POC Email field is not used; the
+  **Accountant Email** (`accountant_email`, added 2026-09-22) and nothing
+  else — when it is blank or not an address, `HubspotDeal.billingEmail` is
+  null, no email is sent and the step records "no Accountant Email on the
+  HubSpot deal" as `email_error` (business decision 2026-09-22: no
+  fallback to the contact; the Billing POC Email field is not used). The
   contact stays the Zoho customer identity, and a deal with no contact is
   billable when the Accountant Email is set; explicit subject/body
   carrying the Razorpay link),

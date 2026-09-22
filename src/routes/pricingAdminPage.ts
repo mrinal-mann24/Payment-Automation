@@ -161,7 +161,7 @@ export const pricingAdminHtml = `<!doctype html>
     <div class="card-head">
       <h2>Clients</h2>
       <span class="count" id="deals-count"></span>
-      <p>How each client is billed, decided from the latest HubSpot line item's term. <strong>Quote now</strong> appears when a cycle is due and nothing has been sent. Quotes and invoices are emailed to the <strong>Accountant email</strong> (HubSpot's Accountant Email field; saving writes it back to HubSpot) and sent to the client's WhatsApp group.</p>
+      <p>How each client is billed, decided from the latest HubSpot line item's term. <strong>Quote now</strong> appears when a cycle is due and nothing has been sent. Quotes and invoices are emailed <strong>only</strong> to the <strong>Accountant email</strong> (HubSpot's Accountant Email field; saving writes it back to HubSpot). With no accountant email, nothing is emailed and the client gets WhatsApp only.</p>
     </div>
     <div class="table-wrap">
       <table>
@@ -334,6 +334,7 @@ function renderStats(data) {
     kinds[d.billing.kind] = (kinds[d.billing.kind] || 0) + 1;
     if (d.billing.due && !d.billing.quoted) dueNow++;
   }
+  const noEmail = deals.filter((d) => !d.email.accountantValid).length;
   const cycles = deals.flatMap((d) => d.cycles);
   const unpaid = cycles.filter((c) => c.status !== 'paid').length;
   const attention = kinds.unsupported + kinds.none;
@@ -344,6 +345,7 @@ function renderStats(data) {
     ['Quarterly / half-yearly', kinds.term, '', 'quoted when the term ends'],
     ['Due, not quoted', dueNow, dueNow ? 'warn' : 'good', dueNow ? 'press Quote now to send' : 'nothing waiting'],
     ['Needs HubSpot fix', attention, attention ? 'bad' : 'good', 'unsupported term or no line item'],
+    ['No accountant email', noEmail, noEmail ? 'warn' : 'good', 'these clients get WhatsApp only'],
     ['Unpaid cycles', unpaid, unpaid ? 'warn' : 'good', 'awaiting payment'],
     ['One-time quotes', data.additions.length, '', 'sent so far'],
   ];
@@ -398,7 +400,7 @@ function emailCell(deal) {
   input.type = 'email';
   input.className = 'mono';
   input.value = e.accountantEmail ?? '';
-  input.placeholder = e.contactEmail ? 'uses contact email' : 'no email in HubSpot';
+  input.placeholder = 'not set — no email is sent';
   const saveBtn = el('button', 'btn secondary small', 'Save');
   saveBtn.type = 'button';
   saveBtn.onclick = async () => {
@@ -406,7 +408,7 @@ function emailCell(deal) {
     const done = busy(saveBtn, 'Saving');
     try {
       await postJson('/admin/pricing/accountant-email', { dealId: deal.dealId, email });
-      toast('ok', deal.dealName + ': accountant email ' + (email ? 'saved to HubSpot' : 'cleared — quotes go to the contact\\'s email'));
+      toast('ok', deal.dealName + ': accountant email ' + (email ? 'saved to HubSpot' : 'cleared — no email will be sent'));
       await loadDeals();
     } catch (err) {
       toast('err', deal.dealName + ': ' + err.message, true);
@@ -416,12 +418,10 @@ function emailCell(deal) {
   row.appendChild(input);
   row.appendChild(saveBtn);
   td.appendChild(row);
-  if (e.source === 'accountant') {
-    td.appendChild(el('div', 'sub', 'Quotes go here (Accountant Email)'));
-  } else if (e.source === 'contact') {
-    td.appendChild(el('div', 'sub', (e.accountantEmail ? 'Not a valid email — ignored. ' : '') + 'Quotes go to ' + e.contactEmail + ' (HubSpot contact)'));
+  if (e.accountantValid) {
+    td.appendChild(el('div', 'sub', 'Quotes and invoices are emailed here'));
   } else {
-    td.appendChild(el('div', 'sub warn', 'No email anywhere — quotes cannot be sent until one is entered'));
+    td.appendChild(el('div', 'sub warn', (e.accountantEmail ? 'Not a valid email — ignored. ' : '') + 'No email is sent for this client — WhatsApp only'));
   }
   return td;
 }

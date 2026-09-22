@@ -40,9 +40,10 @@ export interface HubspotDeal {
   contactName: string;
   contactPhone: string | null;
   // Where quotes and invoices are emailed: the deal's Accountant Email
-  // when it is a real address, else contactEmail. Optional only so test
+  // when it is a real address, otherwise null and NO email is sent (there
+  // is deliberately no fallback to the contact). Optional only so test
   // fixtures stay valid; the fetch always sets it.
-  billingEmail?: string;
+  billingEmail?: string | null;
   lineItems: HubspotLineItem[];
 }
 
@@ -135,9 +136,8 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
   ]);
 
   // The associated contact is the Zoho customer identity; the deal's
-  // Accountant Email is where documents are sent (it differs from the
-  // contact on several live deals). A deal with no contact can still be
-  // billed when the Accountant Email is set.
+  // Accountant Email is the only address documents are emailed to. A deal
+  // with no contact can still be billed when the Accountant Email is set.
   const contactEmail = asEmail(contact?.properties.email);
   const accountantEmail = asEmail(deal.properties.accountant_email);
   const identityEmail = contactEmail ?? accountantEmail;
@@ -162,7 +162,7 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
     contactEmail: identityEmail,
     contactName,
     contactPhone: contact?.properties.phone ?? null,
-    billingEmail: accountantEmail ?? identityEmail,
+    billingEmail: accountantEmail,
     lineItems: lineItems.map((item) => parseLineItem(dealId, item)),
   };
 }
@@ -433,13 +433,11 @@ export async function updateDealAccountantEmail(dealId: string, email: string | 
 
 export interface DealEmails {
   accountantEmail: string | null; // raw HubSpot value, junk included, so the page can show what is there
-  contactEmail: string | null; // the primary associated contact's email
 }
 
-// Admin page: every deal's Accountant Email and primary contact email in
-// three batch calls (deals, deal→contact associations, contacts).
+// Admin page: every deal's Accountant Email in one batch call.
 export async function fetchVaDealEmails(dealIds: string[]): Promise<Map<string, DealEmails>> {
-  const emails = new Map<string, DealEmails>(dealIds.map((id) => [id, { accountantEmail: null, contactEmail: null }]));
+  const emails = new Map<string, DealEmails>(dealIds.map((id) => [id, { accountantEmail: null }]));
   if (dealIds.length === 0) {
     return emails;
   }
@@ -451,29 +449,6 @@ export async function fetchVaDealEmails(dealIds: string[]): Promise<Map<string, 
   for (const deal of deals.results) {
     const entry = emails.get(deal.id);
     if (entry) entry.accountantEmail = deal.properties.accountant_email?.trim() || null;
-  }
-
-  const associations = (await hubspotFetch("/crm/v4/associations/deals/contacts/batch/read", {
-    method: "POST",
-    body: JSON.stringify({ inputs: dealIds.map((id) => ({ id })) }),
-  })) as { results: Array<{ from: { id: string }; to: Array<{ toObjectId: number | string }> }> };
-  const primaryContactByDeal = new Map<string, string>();
-  for (const row of associations.results ?? []) {
-    const first = row.to[0];
-    if (first) primaryContactByDeal.set(row.from.id, String(first.toObjectId));
-  }
-
-  const contactIds = [...new Set(primaryContactByDeal.values())];
-  if (contactIds.length > 0) {
-    const contacts = (await hubspotFetch("/crm/v3/objects/contacts/batch/read", {
-      method: "POST",
-      body: JSON.stringify({ inputs: contactIds.map((id) => ({ id })), properties: ["email"] }),
-    })) as { results: Array<{ id: string; properties: { email?: string | null } }> };
-    const emailByContact = new Map(contacts.results.map((c) => [c.id, c.properties.email?.trim() || null]));
-    for (const [dealId, contactId] of primaryContactByDeal) {
-      const entry = emails.get(dealId);
-      if (entry) entry.contactEmail = emailByContact.get(contactId) ?? null;
-    }
   }
 
   return emails;

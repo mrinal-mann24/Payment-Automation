@@ -105,18 +105,14 @@ function additionView(charge: AdditionCharge, dealNames: Map<string, string>) {
 }
 
 // Where this deal's quotes and invoices are emailed: the Accountant Email
-// when it is a real address, else the primary contact's email.
+// when it is a real address, otherwise nowhere (no email is sent).
 function emailView(emails: DealEmails | undefined) {
   const accountantEmail = emails?.accountantEmail ?? null;
-  const contactEmail = emails?.contactEmail ?? null;
   const accountantValid = asEmail(accountantEmail) !== null;
-  const sendsTo = accountantValid ? accountantEmail : contactEmail;
   return {
     accountantEmail,
     accountantValid,
-    contactEmail,
-    sendsTo,
-    source: accountantValid ? "accountant" : contactEmail ? "contact" : null,
+    sendsTo: accountantValid ? accountantEmail : null,
   };
 }
 

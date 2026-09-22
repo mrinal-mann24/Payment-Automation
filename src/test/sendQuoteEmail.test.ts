@@ -67,6 +67,7 @@ const fakeDeal = {
   dealName: "Acme <> VA",
   billingPeriod: null,
   contactEmail: "client@example.com",
+  billingEmail: "client@example.com",
   contactName: "Client Name",
   contactPhone: "919876543210",
   lineItems: [{ id: "li-1", name: "Service", quantity: 1, price: 5000 }],
@@ -140,5 +141,18 @@ describe("sendQuoteEmail — billing email", () => {
     await sendQuoteEmail(fakeSupabase, "deal-1", "2026-10");
 
     expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toBe("accounts@acme.example");
+  });
+});
+
+describe("sendQuoteEmail — no accountant email", () => {
+  it("sends nothing and records why when the deal has no Accountant Email (no fallback to the contact)", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal, billingEmail: null });
+
+    const result = await sendQuoteEmail(fakeSupabase, "deal-1", "2026-10");
+
+    expect(emailEstimate).not.toHaveBeenCalled();
+    expect(markEmailError).toHaveBeenCalledWith(fakeSupabase, "job-1", "quote email: no Accountant Email on the HubSpot deal");
+    expect(result).toEqual({ sent: false, error: "no Accountant Email on the HubSpot deal" });
   });
 });

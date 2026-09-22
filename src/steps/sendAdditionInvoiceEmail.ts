@@ -30,9 +30,13 @@ export async function sendAdditionInvoiceEmail(
 
   try {
     const deal = await fetchDealWithLineItemsAndContact(charge.hubspot_deal_id);
+    if (!deal.billingEmail) {
+      await markAdditionEmailError(supabase, charge.id, `invoice email: no Accountant Email on the HubSpot deal`);
+      return { sent: false, error: "no Accountant Email on the HubSpot deal" };
+    }
 
     await emailInvoice(charge.zoho_invoice_id, {
-      to: deal.billingEmail ?? deal.contactEmail,
+      to: deal.billingEmail,
       subject: `Payment received — invoice ${charge.zoho_invoice_number}`,
       body: [
         `Dear ${deal.contactName || "Client"},`,

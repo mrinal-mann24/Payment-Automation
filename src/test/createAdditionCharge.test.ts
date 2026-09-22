@@ -46,6 +46,7 @@ const deal = {
   dealName: "Acme <> VA",
   billingPeriod: null,
   contactEmail: "client@example.com",
+  billingEmail: "client@example.com",
   contactName: "Client Name",
   contactPhone: "9876543210",
   lineItems: [{ id: "li-1", name: "VA Monthly", quantity: 1, price: 5000 }],
@@ -203,5 +204,18 @@ describe("createAdditionCharge — billing email", () => {
 
     expect(findOrCreateCustomer).toHaveBeenCalledWith("client@example.com", "Client Name");
     expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toBe("accounts@acme.example");
+  });
+});
+
+describe("createAdditionCharge — no accountant email", () => {
+  it("still sends the quote on WhatsApp but skips the email with a recorded reason", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...deal, billingEmail: null });
+
+    const result = await createAdditionCharge(fakeSupabase, "deal-1", 2500, "Site visit", null);
+
+    expect(sendDocumentMessage).toHaveBeenCalled();
+    expect(emailEstimate).not.toHaveBeenCalled();
+    expect(markAdditionEmailError).toHaveBeenCalledWith(fakeSupabase, row.id, "quote email: no Accountant Email on the HubSpot deal");
+    expect(result).toMatchObject({ periskopeSent: true, emailSent: false, emailError: "no Accountant Email on the HubSpot deal" });
   });
 });

@@ -28,10 +28,14 @@ export async function sendInvoiceEmail(
 
   try {
     const deal = await fetchDealWithLineItemsAndContact(dealId);
+    if (!deal.billingEmail) {
+      await markEmailError(supabase, job.id, `invoice email: no Accountant Email on the HubSpot deal`);
+      return { sent: false, error: "no Accountant Email on the HubSpot deal" };
+    }
     const period = job.service_period_start ? servicePeriodFrom(job.service_period_start, job.term_months ?? 1).narration : null;
 
     await emailInvoice(job.zoho_invoice_id, {
-      to: deal.billingEmail ?? deal.contactEmail,
+      to: deal.billingEmail,
       subject: `Payment received — invoice ${job.zoho_invoice_number}`,
       body: [
         `Dear ${deal.contactName || "Client"},`,

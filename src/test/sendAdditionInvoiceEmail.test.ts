@@ -54,6 +54,7 @@ beforeEach(() => {
     dealName: "Acme <> VA",
     billingPeriod: null,
     contactEmail: "client@example.com",
+    billingEmail: "client@example.com",
     contactName: "Client Name",
     contactPhone: null,
     lineItems: [],
@@ -109,5 +110,26 @@ describe("sendAdditionInvoiceEmail — billing email", () => {
     await sendAdditionInvoiceEmail(fakeSupabase, "QT-OT");
 
     expect(vi.mocked(emailInvoice).mock.calls[0]![1].to).toBe("accounts@acme.example");
+  });
+});
+
+describe("sendAdditionInvoiceEmail — no accountant email", () => {
+  it("sends nothing and records why when the deal has no Accountant Email", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      dealId: "deal-1",
+      dealName: "Acme <> VA",
+      billingPeriod: null,
+      contactEmail: "owner@acme.example",
+      billingEmail: null,
+      contactName: "Client Name",
+      contactPhone: null,
+      lineItems: [],
+    });
+
+    const result = await sendAdditionInvoiceEmail(fakeSupabase, "QT-OT");
+
+    expect(emailInvoice).not.toHaveBeenCalled();
+    expect(markAdditionEmailError).toHaveBeenCalledWith(fakeSupabase, "row-1", "invoice email: no Accountant Email on the HubSpot deal");
+    expect(result).toEqual({ sent: false, error: "no Accountant Email on the HubSpot deal" });
   });
 });

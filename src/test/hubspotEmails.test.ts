@@ -56,7 +56,7 @@ function mockDealFetch(opts: {
 }
 
 describe("fetchDealWithLineItemsAndContact — billing email", () => {
-  it("sends to the deal's Accountant Email when it is a real address, keeping the contact as the Zoho identity", async () => {
+  it("emails go to the deal's Accountant Email when it is a real address; the contact stays the Zoho identity", async () => {
     mockDealFetch({ accountantEmail: "accounts@acme.example", contact: { email: "owner@acme.example", phone: "9876543210" } });
 
     const deal = await fetchDealWithLineItemsAndContact("deal-1");
@@ -66,25 +66,18 @@ describe("fetchDealWithLineItemsAndContact — billing email", () => {
     expect(deal.contactName).toBe("Client Name");
   });
 
-  it("falls back to the contact's email when the Accountant Email is blank or not an email", async () => {
+  it("has no billing email at all when the Accountant Email is blank or junk — never the contact's, never the POC's", async () => {
     for (const junk of [null, "", "NA", "--", "98911 46116"]) {
-      mockDealFetch({ accountantEmail: junk, contact: { email: "owner@acme.example" } });
+      mockDealFetch({ accountantEmail: junk, pocEmail: "poc@acme.example", contact: { email: "owner@acme.example" } });
 
       const deal = await fetchDealWithLineItemsAndContact("deal-1");
 
-      expect(deal.billingEmail).toBe("owner@acme.example");
+      expect(deal.billingEmail).toBeNull();
+      expect(deal.contactEmail).toBe("owner@acme.example");
     }
   });
 
-  it("never uses the Billing POC Email, even when it is set", async () => {
-    mockDealFetch({ accountantEmail: null, pocEmail: "poc@acme.example", contact: { email: "owner@acme.example" } });
-
-    const deal = await fetchDealWithLineItemsAndContact("deal-1");
-
-    expect(deal.billingEmail).toBe("owner@acme.example");
-  });
-
-  it("uses the Accountant Email as the identity when the deal has no associated contact", async () => {
+  it("uses the Accountant Email as the Zoho identity when the deal has no associated contact", async () => {
     mockDealFetch({ accountantEmail: "accounts@acme.example", pocName: "Ayurpet", contact: null });
 
     const deal = await fetchDealWithLineItemsAndContact("deal-1");
@@ -118,7 +111,7 @@ describe("updateDealAccountantEmail", () => {
 });
 
 describe("fetchVaDealEmails", () => {
-  it("reads every deal's Accountant Email and primary contact email in three batch calls; a deal missing from a batch result is left blank", async () => {
+  it("reads every deal's Accountant Email in one batch call; a deal missing from the result is left blank", async () => {
     const calls: string[] = [];
     let requestedProperties: string[] = [];
     global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -134,26 +127,23 @@ describe("fetchVaDealEmails", () => {
           })),
         });
       }
-      if (path.endsWith("/crm/v4/associations/deals/contacts/batch/read")) {
-        return jsonResponse({ results: [{ from: { id: "d1" }, to: [{ toObjectId: 501 }] }, { from: { id: "d2" }, to: [{ toObjectId: 502 }] }] }, 207);
-      }
-      if (path.endsWith("/crm/v3/objects/contacts/batch/read")) {
-        return jsonResponse({
-          results: [
-            { id: "501", properties: { email: "owner@one.example" } },
-            { id: "502", properties: { email: "owner@two.example" } },
-          ],
-        });
-      }
       throw new Error(`Unexpected fetch: ${path}`);
     }) as unknown as typeof fetch;
 
     const emails = await fetchVaDealEmails(["d1", "d2", "d3"]);
 
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(1);
     expect(requestedProperties).toEqual(["accountant_email"]);
-    expect(emails.get("d1")).toEqual({ accountantEmail: "accounts@one.example", contactEmail: "owner@one.example" });
-    expect(emails.get("d2")).toEqual({ accountantEmail: "NA", contactEmail: "owner@two.example" });
-    expect(emails.get("d3")).toEqual({ accountantEmail: null, contactEmail: null });
+    expect(emails.get("d1")).toEqual({ accountantEmail: "accounts@one.example" });
+    expect(emails.get("d2")).toEqual({ accountantEmail: "NA" });
+    expect(emails.get("d3")).toEqual({ accountantEmail: null });
+  });
+
+  it("makes no call for an empty deal list", async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error("should not be called");
+    }) as unknown as typeof fetch;
+
+    expect((await fetchVaDealEmails([])).size).toBe(0);
   });
 });
