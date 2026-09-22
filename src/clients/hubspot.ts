@@ -36,9 +36,13 @@ export interface HubspotDeal {
   dealId: string;
   dealName: string;
   billingPeriod: string | null;
-  contactEmail: string;
+  contactEmail: string; // Zoho customer identity: the associated contact, or the Billing POC when there is no contact
   contactName: string;
   contactPhone: string | null;
+  // Where quotes and invoices are emailed: the deal's Billing POC Email
+  // when it is a real address, else contactEmail. Optional only so test
+  // fixtures stay valid; the fetch always sets it.
+  billingEmail?: string;
   lineItems: HubspotLineItem[];
 }
 
@@ -66,6 +70,8 @@ interface HubspotDealResponse {
     dealname?: string;
     billing_cycle?: string;
     next_renewal_date?: string;
+    billing_poc_email?: string | null;
+    billing_poc_name?: string | null;
   };
   associations?: {
     "line items"?: { results: Array<{ id: string }> };
@@ -98,17 +104,20 @@ interface HubspotContactResponse {
   };
 }
 
+// The live Billing POC Email field holds junk on some deals ("NA", "--", a
+// phone number); anything that is not shaped like an address is ignored.
+export function asEmail(value: string | null | undefined): string | null {
+  const trimmed = (value ?? "").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
+}
+
 export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<HubspotDeal> {
   const deal = (await hubspotFetch(
-    `/crm/v3/objects/deals/${dealId}?properties=dealname,billing_cycle,next_renewal_date&associations=line_items,contacts`,
+    `/crm/v3/objects/deals/${dealId}?properties=dealname,billing_cycle,next_renewal_date,billing_poc_email,billing_poc_name&associations=line_items,contacts`,
   )) as HubspotDealResponse;
 
   const lineItemIds = deal.associations?.["line items"]?.results.map((r) => r.id) ?? [];
   const contactId = deal.associations?.contacts?.results[0]?.id;
-
-  if (!contactId) {
-    throw new Error(`HubSpot deal ${dealId} has no associated contact`);
-  }
 
   const [lineItems, contact] = await Promise.all([
     Promise.all(
@@ -118,18 +127,30 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
         ) as Promise<HubspotLineItemResponse>,
       ),
     ),
-    hubspotFetch(
-      `/crm/v3/objects/contacts/${contactId}?properties=email,firstname,lastname,phone`,
-    ) as Promise<HubspotContactResponse>,
+    contactId
+      ? (hubspotFetch(
+          `/crm/v3/objects/contacts/${contactId}?properties=email,firstname,lastname,phone`,
+        ) as Promise<HubspotContactResponse>)
+      : Promise.resolve(null),
   ]);
 
-  if (!contact.properties.email) {
-    throw new Error(`HubSpot contact ${contactId} for deal ${dealId} has no email`);
+  // The associated contact is the Zoho customer identity; the deal's
+  // Billing POC Email is where documents are sent (it differs from the
+  // contact on several live deals). A deal with no contact can still be
+  // billed when the POC email is set.
+  const contactEmail = asEmail(contact?.properties.email);
+  const billingPocEmail = asEmail(deal.properties.billing_poc_email);
+  const identityEmail = contactEmail ?? billingPocEmail;
+  if (!identityEmail) {
+    throw new Error(`HubSpot deal ${dealId} has no associated contact email and no valid Billing POC Email`);
   }
+  const contactName = contact
+    ? [contact.properties.firstname, contact.properties.lastname].filter(Boolean).join(" ")
+    : (deal.properties.billing_poc_name ?? "").trim();
 
-  // Legacy (due-date-driven) cycle key. Monthly cycles are keyed by calendar
-  // month instead, so missing properties are only an error on the legacy
-  // path — createZohoEstimate decides, not this fetch.
+  // Legacy (due-date-driven) cycle key. Billing cycles are keyed by their
+  // own period instead, so missing properties are only an error on the
+  // legacy path — createZohoEstimate decides, not this fetch.
   const billingCycle = deal.properties.billing_cycle;
   const nextRenewalDate = deal.properties.next_renewal_date;
   const billingPeriod = billingCycle && nextRenewalDate ? `${billingCycle}-${nextRenewalDate}` : null;
@@ -138,11 +159,10 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
     dealId: deal.id,
     dealName: deal.properties.dealname ?? "",
     billingPeriod,
-    contactEmail: contact.properties.email,
-    contactName: [contact.properties.firstname, contact.properties.lastname]
-      .filter(Boolean)
-      .join(" "),
-    contactPhone: contact.properties.phone ?? null,
+    contactEmail: identityEmail,
+    contactName,
+    contactPhone: contact?.properties.phone ?? null,
+    billingEmail: billingPocEmail ?? identityEmail,
     lineItems: lineItems.map((item) => parseLineItem(dealId, item)),
   };
 }
@@ -400,4 +420,61 @@ export async function addLineItemToDeal(
       ],
     }),
   });
+}
+
+// Admin page: set (or clear, with null) the deal's Billing POC Email — the
+// address quotes and invoices are emailed to.
+export async function updateDealBillingPocEmail(dealId: string, email: string | null): Promise<void> {
+  await hubspotFetch(`/crm/v3/objects/deals/${dealId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: { billing_poc_email: email ?? "" } }),
+  });
+}
+
+export interface DealEmails {
+  billingPocEmail: string | null; // raw HubSpot value, junk included, so the page can show what is there
+  contactEmail: string | null; // the primary associated contact's email
+}
+
+// Admin page: every deal's Billing POC Email and primary contact email in
+// three batch calls (deals, deal→contact associations, contacts).
+export async function fetchVaDealEmails(dealIds: string[]): Promise<Map<string, DealEmails>> {
+  const emails = new Map<string, DealEmails>(dealIds.map((id) => [id, { billingPocEmail: null, contactEmail: null }]));
+  if (dealIds.length === 0) {
+    return emails;
+  }
+
+  const deals = (await hubspotFetch("/crm/v3/objects/deals/batch/read", {
+    method: "POST",
+    body: JSON.stringify({ inputs: dealIds.map((id) => ({ id })), properties: ["billing_poc_email"] }),
+  })) as { results: Array<{ id: string; properties: { billing_poc_email?: string | null } }> };
+  for (const deal of deals.results) {
+    const entry = emails.get(deal.id);
+    if (entry) entry.billingPocEmail = deal.properties.billing_poc_email?.trim() || null;
+  }
+
+  const associations = (await hubspotFetch("/crm/v4/associations/deals/contacts/batch/read", {
+    method: "POST",
+    body: JSON.stringify({ inputs: dealIds.map((id) => ({ id })) }),
+  })) as { results: Array<{ from: { id: string }; to: Array<{ toObjectId: number | string }> }> };
+  const primaryContactByDeal = new Map<string, string>();
+  for (const row of associations.results ?? []) {
+    const first = row.to[0];
+    if (first) primaryContactByDeal.set(row.from.id, String(first.toObjectId));
+  }
+
+  const contactIds = [...new Set(primaryContactByDeal.values())];
+  if (contactIds.length > 0) {
+    const contacts = (await hubspotFetch("/crm/v3/objects/contacts/batch/read", {
+      method: "POST",
+      body: JSON.stringify({ inputs: contactIds.map((id) => ({ id })), properties: ["email"] }),
+    })) as { results: Array<{ id: string; properties: { email?: string | null } }> };
+    const emailByContact = new Map(contacts.results.map((c) => [c.id, c.properties.email?.trim() || null]));
+    for (const [dealId, contactId] of primaryContactByDeal) {
+      const entry = emails.get(dealId);
+      if (entry) entry.contactEmail = emailByContact.get(contactId) ?? null;
+    }
+  }
+
+  return emails;
 }

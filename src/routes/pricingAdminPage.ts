@@ -161,7 +161,7 @@ export const pricingAdminHtml = `<!doctype html>
     <div class="card-head">
       <h2>Clients</h2>
       <span class="count" id="deals-count"></span>
-      <p>How each client is billed, decided from the latest HubSpot line item's term. <strong>Quote now</strong> appears when a cycle is due and nothing has been sent. The one-time quote goes to the client's WhatsApp group and email.</p>
+      <p>How each client is billed, decided from the latest HubSpot line item's term. <strong>Quote now</strong> appears when a cycle is due and nothing has been sent. Quotes and invoices are emailed to the <strong>Billing email</strong> (HubSpot's Billing POC Email; saving writes it back to HubSpot) and sent to the client's WhatsApp group.</p>
     </div>
     <div class="table-wrap">
       <table>
@@ -170,6 +170,7 @@ export const pricingAdminHtml = `<!doctype html>
             <th style="min-width:200px">Deal</th>
             <th style="width:130px">Stage</th>
             <th style="min-width:250px">Billing</th>
+            <th style="width:260px">Billing email</th>
             <th style="width:230px">Base price / month</th>
             <th style="min-width:460px">One-time quote</th>
           </tr>
@@ -389,6 +390,42 @@ function billingCell(deal) {
   return td;
 }
 
+function emailCell(deal) {
+  const td = document.createElement('td');
+  const e = deal.email;
+  const row = el('div', 'field-row');
+  const input = document.createElement('input');
+  input.type = 'email';
+  input.className = 'mono';
+  input.value = e.billingPocEmail ?? '';
+  input.placeholder = e.contactEmail ? 'uses contact email' : 'no email in HubSpot';
+  const saveBtn = el('button', 'btn secondary small', 'Save');
+  saveBtn.type = 'button';
+  saveBtn.onclick = async () => {
+    const email = input.value.trim();
+    const done = busy(saveBtn, 'Saving');
+    try {
+      await postJson('/admin/pricing/billing-email', { dealId: deal.dealId, email });
+      toast('ok', deal.dealName + ': billing email ' + (email ? 'saved to HubSpot' : 'cleared — quotes go to the contact\\'s email'));
+      await loadDeals();
+    } catch (err) {
+      toast('err', deal.dealName + ': ' + err.message, true);
+      done();
+    }
+  };
+  row.appendChild(input);
+  row.appendChild(saveBtn);
+  td.appendChild(row);
+  if (e.source === 'billing_poc') {
+    td.appendChild(el('div', 'sub', 'Quotes go here (Billing POC)'));
+  } else if (e.source === 'contact') {
+    td.appendChild(el('div', 'sub', (e.billingPocEmail ? 'Not a valid email — ignored. ' : '') + 'Quotes go to ' + e.contactEmail + ' (HubSpot contact)'));
+  } else {
+    td.appendChild(el('div', 'sub warn', 'No email anywhere — quotes cannot be sent until one is entered'));
+  }
+  return td;
+}
+
 function renderDeals(data) {
   const tbody = document.getElementById('deals-body');
   tbody.innerHTML = '';
@@ -405,6 +442,7 @@ function renderDeals(data) {
 
     tr.appendChild(el('td', null, stageName(deal.dealStage)));
     tr.appendChild(billingCell(deal));
+    tr.appendChild(emailCell(deal));
 
     const priceTd = document.createElement('td');
     const priceRow = el('div', 'field-row');
@@ -496,6 +534,7 @@ function paymentForm(deal, cycle, today) {
   date.type = 'date';
   date.className = 'mono';
   date.value = today;
+  date.max = today;
   const method = document.createElement('select');
   for (const [value, label] of [['upi', 'UPI'], ['neft', 'NEFT / IMPS / RTGS'], ['cheque', 'Cheque'], ['cash', 'Cash'], ['yes_bank', 'Yes Bank'], ['other', 'Other']]) {
     const opt = document.createElement('option');
@@ -562,6 +601,59 @@ function paymentForm(deal, cycle, today) {
   return form;
 }
 
+// "Paid through Yes Bank" asks for the real payment date: the accountant
+// often sees the transfer a day or two later, and HubSpot's Date Paid must
+// carry the day the money actually arrived.
+function yesBankForm(deal, cycle, today) {
+  const form = el('div', 'payment-form');
+  const label = el('div', 'full', 'Yes Bank payment of ' + money(cycle.quoteTotal) + ' for ' + deal.dealName + ' (' + cycle.billingPeriod + ')');
+  label.style.fontWeight = '600';
+  const date = document.createElement('input');
+  date.type = 'date';
+  date.className = 'mono';
+  date.value = today;
+  date.max = today;
+  const narration = document.createElement('input');
+  narration.type = 'text';
+  narration.placeholder = 'Narration (optional, e.g. bank reference)';
+  const save = el('button', 'btn teal small', 'Confirm payment');
+  save.type = 'button';
+  const cancel = el('button', 'btn secondary small', 'Cancel');
+  cancel.type = 'button';
+  const hint = el('div', 'sub full', 'Payment date = the day the money reached the bank. It is written to HubSpot as Date Paid.');
+
+  save.onclick = async () => {
+    if (!date.value) { toast('err', 'Enter the payment date', true); return; }
+    const done = busy(save, 'Recording…');
+    try {
+      const result = await postJson('/admin/pricing/record-payment', {
+        jobId: cycle.jobId,
+        method: 'yes_bank',
+        paymentDate: date.value,
+        narration: narration.value.trim(),
+      });
+      const outstanding = result.errors && result.errors.length > 0;
+      toast(outstanding ? 'err' : 'ok', deal.dealName + ' (' + cycle.billingPeriod + '): ' + settlementSummary(result), outstanding);
+      await loadDeals();
+    } catch (err) {
+      toast('err', deal.dealName + ': ' + err.message, true);
+      done();
+    }
+  };
+  cancel.onclick = () => form.remove();
+
+  const buttons = el('div', 'buttons');
+  buttons.appendChild(save);
+  buttons.appendChild(cancel);
+
+  form.appendChild(label);
+  form.appendChild(date);
+  form.appendChild(narration);
+  form.appendChild(hint);
+  form.appendChild(buttons);
+  return form;
+}
+
 function remindersCell(count) {
   const td = el('td', null);
   const dots = el('span', 'reminders');
@@ -622,21 +714,10 @@ function renderCycles(data) {
         bankBtn.type = 'button';
         const manualBtn = el('button', 'btn violet small', 'Record manual payment');
         manualBtn.type = 'button';
-        bankBtn.onclick = async () => {
-          if (!confirm('Mark ' + deal.dealName + ' (' + cycle.billingPeriod + ') as PAID through Yes Bank for ' + money(cycle.quoteTotal) + '?')) return;
-          const narration = prompt('Narration (optional, e.g. bank reference):', '') ?? '';
-          const done = busy(bankBtn, 'Recording…');
-          manualBtn.disabled = true;
-          try {
-            const result = await postJson('/admin/pricing/record-payment', { jobId: cycle.jobId, method: 'yes_bank', narration: narration.trim() });
-            const outstanding = result.errors && result.errors.length > 0;
-            toast(outstanding ? 'err' : 'ok', deal.dealName + ' (' + cycle.billingPeriod + '): ' + settlementSummary(result), outstanding);
-            await loadDeals();
-          } catch (err) {
-            toast('err', deal.dealName + ': ' + err.message, true);
-            done();
-            manualBtn.disabled = false;
-          }
+        bankBtn.onclick = () => {
+          const existing = actionsTd.querySelector('.payment-form');
+          if (existing) { existing.remove(); return; }
+          actionsTd.appendChild(yesBankForm(deal, cycle, data.cycle.today));
         };
         manualBtn.onclick = () => {
           const existing = actionsTd.querySelector('.payment-form');

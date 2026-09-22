@@ -32,7 +32,7 @@ export async function sendAdditionInvoiceEmail(
     const deal = await fetchDealWithLineItemsAndContact(charge.hubspot_deal_id);
 
     await emailInvoice(charge.zoho_invoice_id, {
-      to: deal.contactEmail,
+      to: deal.billingEmail ?? deal.contactEmail,
       subject: `Payment received — invoice ${charge.zoho_invoice_number}`,
       body: [
         `Dear ${deal.contactName || "Client"},`,

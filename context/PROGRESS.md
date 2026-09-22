@@ -125,6 +125,18 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (admin tweaks) — "Paid through Yes Bank" now opens an inline
+  form with the real payment date (+ narration) instead of a prompt, so
+  HubSpot's Date Paid is the day the money arrived, not the day the
+  accountant noticed. Quotes and invoices are emailed to the deal's
+  HubSpot **Billing POC Email** (valid address) with the contact's email
+  as fallback; the Clients table shows and edits it in place, writing back
+  to HubSpot (`fetchVaDealEmails`, `updateDealBillingPocEmail`,
+  `HubspotDeal.billingEmail`). A deal with no associated contact is now
+  billable when its POC email is set (Ayurpet). Live: 15 deals use the POC
+  email, 11 fall back, 4 junk values ignored, 2 deals (Leon, Root Botanie)
+  have no email at all and cannot be emailed until one is entered.
+  typecheck clean, 178/178.
 - 2026-09-22 (UI) — Admin page redesigned (`src/routes/pricingAdminPage.ts`)
   along the 2026 dense-UI guidance: ledger-style summary strip, visible
   table grid with monospaced numerals, fluid type via clamp(), stage IDs

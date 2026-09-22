@@ -42,7 +42,7 @@ export async function sendQuoteEmail(
     const period = job.service_period_start ? servicePeriodFrom(job.service_period_start, job.term_months ?? 1).narration : null;
 
     await emailEstimate(job.zoho_estimate_id, {
-      to: deal.contactEmail,
+      to: deal.billingEmail ?? deal.contactEmail,
       subject: `Virtual Accounting quote ${job.zoho_estimate_number}`,
       body: [
         `Dear ${deal.contactName || "Client"},`,

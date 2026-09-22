@@ -119,7 +119,7 @@ export async function createAdditionCharge(
   let emailError: string | null = null;
   try {
     await emailEstimate(estimateId, {
-      to: deal.contactEmail,
+      to: deal.billingEmail ?? deal.contactEmail,
       subject: `Quote ${estimateNumber} — ${service}`,
       body: [
         `Dear ${deal.contactName || "Client"},`,

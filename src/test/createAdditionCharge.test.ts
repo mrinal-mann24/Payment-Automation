@@ -194,3 +194,14 @@ describe("createAdditionCharge (one-time quote)", () => {
     expect(result).toMatchObject({ zohoEstimateNumber: "QT-OLD", periskopeSent: true, emailSent: true });
   });
 });
+
+describe("createAdditionCharge — billing email", () => {
+  it("emails the one-time quote to the billing email, while the Zoho customer stays keyed by the contact identity", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...deal, billingEmail: "accounts@acme.example" });
+
+    await createAdditionCharge(fakeSupabase, "deal-1", 2500, "Site visit", null);
+
+    expect(findOrCreateCustomer).toHaveBeenCalledWith("client@example.com", "Client Name");
+    expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toBe("accounts@acme.example");
+  });
+});

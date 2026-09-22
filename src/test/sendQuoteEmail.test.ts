@@ -122,3 +122,23 @@ describe("sendQuoteEmail", () => {
     expect(emailEstimate).not.toHaveBeenCalled();
   });
 });
+
+describe("sendQuoteEmail — billing email", () => {
+  it("sends to the deal's billing email (Billing POC) when HubSpot provides one, not the contact identity email", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      dealId: "deal-1",
+      dealName: "Acme <> VA",
+      billingPeriod: null,
+      contactEmail: "owner@acme.example",
+      billingEmail: "accounts@acme.example",
+      contactName: "Client Name",
+      contactPhone: null,
+      lineItems: [],
+    });
+
+    await sendQuoteEmail(fakeSupabase, "deal-1", "2026-10");
+
+    expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toBe("accounts@acme.example");
+  });
+});

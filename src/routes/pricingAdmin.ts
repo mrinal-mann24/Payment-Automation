@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { getSupabaseClient } from "../clients/supabase.js";
-import { fetchVaDealsWithLineItems } from "../clients/hubspot.js";
+import { asEmail, fetchVaDealEmails, fetchVaDealsWithLineItems, updateDealBillingPocEmail, type DealEmails } from "../clients/hubspot.js";
 import { generateRenewalQuote, QuoteNotDueError } from "../jobs/generateRenewalQuote.js";
 import { listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
 import { upsertClientPricing } from "../repositories/clientPricing.js";
@@ -104,6 +104,22 @@ function additionView(charge: AdditionCharge, dealNames: Map<string, string>) {
   };
 }
 
+// Where this deal's quotes and invoices are emailed: the Billing POC Email
+// when it is a real address, else the primary contact's email.
+function emailView(emails: DealEmails | undefined) {
+  const billingPocEmail = emails?.billingPocEmail ?? null;
+  const contactEmail = emails?.contactEmail ?? null;
+  const pocValid = asEmail(billingPocEmail) !== null;
+  const sendsTo = pocValid ? billingPocEmail : contactEmail;
+  return {
+    billingPocEmail,
+    pocValid,
+    contactEmail,
+    sendsTo,
+    source: pocValid ? "billing_poc" : contactEmail ? "contact" : null,
+  };
+}
+
 pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Response) => {
   try {
     const supabase = getSupabaseClient();
@@ -116,6 +132,7 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
       listRecentAdditionCharges(supabase),
     ]);
     if (pricing.error) throw new Error(pricing.error.message);
+    const emails = await fetchVaDealEmails(deals.map((deal) => deal.dealId));
 
     const pricingByDealId = new Map(pricing.data?.map((r) => [r.hubspot_deal_id, r]) ?? []);
     const jobsByDealId = new Map<string, RenewalJob[]>();
@@ -131,6 +148,7 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
         dealStage: deal.dealStage,
         basePrice: pricingByDealId.get(deal.dealId)?.base_price ?? null,
         billing: billingView(classifyDeal(deal, today), cycle.key, dealJobs),
+        email: emailView(emails.get(deal.dealId)),
         cycles: dealJobs.map(cycleView),
       };
     });
@@ -167,6 +185,35 @@ pricingAdminRouter.post("/admin/pricing/base-price", async (req: Request, res: R
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: "Failed to save base price", details: message });
+  }
+});
+
+// Billing POC Email lives on the HubSpot deal; the page edits it in place.
+// Blank clears it (quotes then go to the contact's email again).
+const billingEmailSchema = z.object({
+  dealId: z.string().min(1),
+  email: z.string().trim().max(200),
+});
+
+pricingAdminRouter.post("/admin/pricing/billing-email", async (req: Request, res: Response) => {
+  const parsed = billingEmailSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return;
+  }
+  const email = parsed.data.email === "" ? null : asEmail(parsed.data.email);
+  if (parsed.data.email !== "" && email === null) {
+    res.status(400).json({ error: "That is not a valid email address" });
+    return;
+  }
+
+  try {
+    await updateDealBillingPocEmail(parsed.data.dealId, email);
+    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> billing POC email ${email ? "updated" : "cleared"}`);
+    res.status(200).json({ ok: true, email });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to update the billing email in HubSpot", details: message });
   }
 });
 

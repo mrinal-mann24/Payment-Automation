@@ -31,7 +31,7 @@ export async function sendInvoiceEmail(
     const period = job.service_period_start ? servicePeriodFrom(job.service_period_start, job.term_months ?? 1).narration : null;
 
     await emailInvoice(job.zoho_invoice_id, {
-      to: deal.contactEmail,
+      to: deal.billingEmail ?? deal.contactEmail,
       subject: `Payment received — invoice ${job.zoho_invoice_number}`,
       body: [
         `Dear ${deal.contactName || "Client"},`,

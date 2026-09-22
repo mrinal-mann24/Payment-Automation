@@ -92,3 +92,22 @@ describe("sendAdditionInvoiceEmail", () => {
     expect(result).toEqual({ sent: false, error: "Zoho Books API error 500" });
   });
 });
+
+describe("sendAdditionInvoiceEmail — billing email", () => {
+  it("sends to the deal's billing email when HubSpot provides one", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      dealId: "deal-1",
+      dealName: "Acme <> VA",
+      billingPeriod: null,
+      contactEmail: "owner@acme.example",
+      billingEmail: "accounts@acme.example",
+      contactName: "Client Name",
+      contactPhone: null,
+      lineItems: [],
+    });
+
+    await sendAdditionInvoiceEmail(fakeSupabase, "QT-OT");
+
+    expect(vi.mocked(emailInvoice).mock.calls[0]![1].to).toBe("accounts@acme.example");
+  });
+});

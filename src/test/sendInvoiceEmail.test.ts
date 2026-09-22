@@ -119,3 +119,23 @@ describe("sendInvoiceEmail", () => {
     expect(markEmailError).toHaveBeenCalledWith(fakeSupabase, "job-1", expect.stringMatching(/500/));
   });
 });
+
+describe("sendInvoiceEmail — billing email", () => {
+  it("sends to the deal's billing email (Billing POC) when HubSpot provides one", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...paidJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      dealId: "deal-1",
+      dealName: "Acme <> VA",
+      billingPeriod: null,
+      contactEmail: "owner@acme.example",
+      billingEmail: "accounts@acme.example",
+      contactName: "Client Name",
+      contactPhone: null,
+      lineItems: [],
+    });
+
+    await sendInvoiceEmail(fakeSupabase, "deal-1", "2026-10");
+
+    expect(vi.mocked(emailInvoice).mock.calls[0]![1].to).toBe("accounts@acme.example");
+  });
+});
