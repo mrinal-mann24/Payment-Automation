@@ -444,14 +444,41 @@ export async function addLineItemToDeal(
   });
 }
 
-// Admin page: set (or clear, with null) the deal's three Accountant Email
-// fields — the addresses quotes and invoices are emailed to.
+// Fields 2 and 3 are created by the team in HubSpot; until then a save
+// must not mention them (HubSpot rejects a PATCH naming an unknown
+// property). Reads are unaffected — HubSpot ignores unknown property names
+// on GET. Checked on every save; saves are rare.
+async function accountantEmailPropertyExists(name: AccountantEmailProperty): Promise<boolean> {
+  const response = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/properties/deals/${name}`, {
+    headers: { Authorization: `Bearer ${config.hubspot.privateAppToken}` },
+  });
+  if (response.status === 404) {
+    return false;
+  }
+  if (!response.ok) {
+    throw new Error(`HubSpot API error ${response.status}: ${await response.text()}`);
+  }
+  return true;
+}
+
+// Admin page: set (or clear, with null) the deal's Accountant Email fields
+// — the addresses quotes and invoices are emailed to. Only fields that
+// exist in HubSpot are written; an address for a missing field is refused
+// with the field named, so the team knows what to create.
 export async function updateDealAccountantEmails(dealId: string, emails: Array<string | null>): Promise<void> {
+  const exists = await Promise.all(ACCOUNTANT_EMAIL_PROPERTIES.map(accountantEmailPropertyExists));
+  const properties: Record<string, string> = {};
+  ACCOUNTANT_EMAIL_PROPERTIES.forEach((name, i) => {
+    const value = emails[i] ?? "";
+    if (exists[i]) {
+      properties[name] = value;
+    } else if (value) {
+      throw new Error(`Accountant Email ${i + 1} (${name}) does not exist in HubSpot yet — create the deal property first`);
+    }
+  });
   await hubspotFetch(`/crm/v3/objects/deals/${dealId}`, {
     method: "PATCH",
-    body: JSON.stringify({
-      properties: Object.fromEntries(ACCOUNTANT_EMAIL_PROPERTIES.map((name, i) => [name, emails[i] ?? ""])),
-    }),
+    body: JSON.stringify({ properties }),
   });
 }
 

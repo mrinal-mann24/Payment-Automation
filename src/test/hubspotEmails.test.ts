@@ -25,6 +25,7 @@ function mockDealFetch(opts: {
   pocEmail?: string | null;
   pocName?: string | null;
   contact: { email?: string; phone?: string } | null;
+  missingFields?: string[]; // Accountant Email properties not yet created in HubSpot
 }) {
   const calls: Array<{ path: string; method: string; body?: unknown }> = [];
   const [e1 = null, e2 = null, e3 = null] = opts.accountantEmails ?? [];
@@ -52,6 +53,12 @@ function mockDealFetch(opts: {
     }
     if (path.endsWith("/crm/v3/objects/deals/deal-1") && init?.method === "PATCH") {
       return jsonResponse({ id: "deal-1" });
+    }
+    const property = /\/crm\/v3\/properties\/deals\/([a-z_0-9]+)$/.exec(path);
+    if (property) {
+      return (opts.missingFields ?? []).includes(property[1]!)
+        ? new Response("{}", { status: 404 })
+        : jsonResponse({ name: property[1] });
     }
     throw new Error(`Unexpected fetch: ${path}`);
   }) as unknown as typeof fetch;
@@ -101,6 +108,25 @@ describe("fetchDealWithLineItemsAndContact — billing emails", () => {
 });
 
 describe("updateDealAccountantEmails", () => {
+  it("writes only the fields that exist in HubSpot while 2 and 3 have not been created yet", async () => {
+    const calls = mockDealFetch({ contact: null, missingFields: ["accountant_email_2", "accountant_email_3"] });
+
+    await updateDealAccountantEmails("deal-1", ["accounts@acme.example", null, null]);
+
+    expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([
+      { properties: { accountant_email: "accounts@acme.example" } },
+    ]);
+  });
+
+  it("refuses an address for a field that does not exist yet, naming the field", async () => {
+    const calls = mockDealFetch({ contact: null, missingFields: ["accountant_email_2", "accountant_email_3"] });
+
+    await expect(updateDealAccountantEmails("deal-1", ["accounts@acme.example", "cfo@acme.example", null])).rejects.toThrow(
+      /Accountant Email 2 .*does not exist in HubSpot/,
+    );
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
+  });
+
   it("PATCHes all three Accountant Email fields, clearing the blank ones with an empty string", async () => {
     const calls = mockDealFetch({ contact: null });
 
