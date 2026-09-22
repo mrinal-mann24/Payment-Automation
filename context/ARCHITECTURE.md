@@ -33,7 +33,7 @@ Daily cron (this backend, in-process, node-cron @ 11:00 IST, noOverlap)
 
 Payment (any route -> one path, src/steps/settleRenewalPayment.ts):
   Razorpay webhook (POST /webhooks/razorpay, signature-verified), or
-  "Paid through Yes Bank" / "Add One-Time Payment" on the admin page
+  "Paid through Yes Bank" / "Record manual payment" on the admin page
   -> record payment (paid_at, first writer wins) -> cancel the Razorpay
      link if paid outside Razorpay -> Step 4: convert estimate to invoice,
      invoice PDF to the WhatsApp group + by email, ONE complete HubSpot
