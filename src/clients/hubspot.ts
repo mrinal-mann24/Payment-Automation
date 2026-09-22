@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { toIsoDate } from "../utils/billingCycle.js";
 
 const HUBSPOT_BASE_URL = "https://api.hubapi.com";
 
@@ -7,7 +8,29 @@ export interface HubspotLineItem {
   name: string;
   quantity: number;
   price: number;
+  // Recurring-billing properties (HubSpot names: recurringbillingfrequency,
+  // hs_recurring_billing_period, hs_recurring_billing_start_date,
+  // billing_term_end_date, recurring_revenue_type, hs_product_id). Dates are
+  // normalised to YYYY-MM-DD. Optional so existing fixtures stay valid.
+  recurringBillingFrequency?: string | null;
+  billingPeriodTerm?: string | null;
+  billingStartDate?: string | null;
+  billingTermEndDate?: string | null;
+  recurringRevenueType?: string | null;
+  productId?: string | null;
 }
+
+const LINE_ITEM_PROPERTIES = [
+  "name",
+  "quantity",
+  "price",
+  "recurringbillingfrequency",
+  "hs_recurring_billing_period",
+  "hs_recurring_billing_start_date",
+  "billing_term_end_date",
+  "recurring_revenue_type",
+  "hs_product_id",
+];
 
 export interface HubspotDeal {
   dealId: string;
@@ -56,6 +79,12 @@ interface HubspotLineItemResponse {
     name?: string;
     quantity?: string;
     price?: string;
+    recurringbillingfrequency?: string | null;
+    hs_recurring_billing_period?: string | null;
+    hs_recurring_billing_start_date?: string | null;
+    billing_term_end_date?: string | null;
+    recurring_revenue_type?: string | null;
+    hs_product_id?: string | null;
   };
 }
 
@@ -85,7 +114,7 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
     Promise.all(
       lineItemIds.map((id) =>
         hubspotFetch(
-          `/crm/v3/objects/line_items/${id}?properties=name,quantity,price`,
+          `/crm/v3/objects/line_items/${id}?properties=${LINE_ITEM_PROPERTIES.join(",")}`,
         ) as Promise<HubspotLineItemResponse>,
       ),
     ),
@@ -146,6 +175,12 @@ function parseLineItem(dealId: string, item: HubspotLineItemResponse): HubspotLi
     name: item.properties.name ?? "",
     quantity,
     price,
+    recurringBillingFrequency: item.properties.recurringbillingfrequency ?? null,
+    billingPeriodTerm: item.properties.hs_recurring_billing_period ?? null,
+    billingStartDate: toIsoDate(item.properties.hs_recurring_billing_start_date),
+    billingTermEndDate: toIsoDate(item.properties.billing_term_end_date),
+    recurringRevenueType: item.properties.recurring_revenue_type ?? null,
+    productId: item.properties.hs_product_id ?? null,
   };
 }
 
@@ -189,6 +224,7 @@ export interface VaPipelineDeal {
   dealId: string;
   dealName: string;
   dealStage: string;
+  billingCycle: string | null;
 }
 
 // Used by the pricing admin interface to list deals to price/charge —
@@ -208,16 +244,81 @@ export async function fetchVaPipelineDeals(): Promise<VaPipelineDeal[]> {
           ],
         },
       ],
-      properties: ["dealname", "dealstage"],
+      properties: ["dealname", "dealstage", "billing_cycle"],
       limit: 100,
     }),
-  })) as { results: Array<{ id: string; properties: { dealname?: string; dealstage?: string } }> };
+  })) as {
+    results: Array<{
+      id: string;
+      properties: { dealname?: string; dealstage?: string; billing_cycle?: string | null };
+    }>;
+  };
 
   return result.results.map((deal) => ({
     dealId: deal.id,
     dealName: deal.properties.dealname ?? "",
     dealStage: deal.properties.dealstage ?? "",
+    billingCycle: deal.properties.billing_cycle ?? null,
   }));
+}
+
+export interface VaDealWithLineItems extends VaPipelineDeal {
+  lineItems: HubspotLineItem[];
+  // Set instead of throwing when one of the line items is malformed, so one
+  // bad record cannot take the whole listing down. The monthly classifier
+  // treats it as "not monthly" (fails closed).
+  lineItemsError?: string;
+}
+
+const HUBSPOT_BATCH_LIMIT = 100;
+
+// Every active VA deal with all of its line items, in a handful of batch
+// calls (deal search, one associations read, line-item reads in chunks of
+// 100) rather than one round trip per line item. Used by the monthly
+// billing classifier and the admin page.
+export async function fetchVaDealsWithLineItems(): Promise<VaDealWithLineItems[]> {
+  const deals = await fetchVaPipelineDeals();
+  if (deals.length === 0) {
+    return [];
+  }
+
+  const associations = (await hubspotFetch("/crm/v4/associations/deals/line_items/batch/read", {
+    method: "POST",
+    body: JSON.stringify({ inputs: deals.map((deal) => ({ id: deal.dealId })) }),
+  })) as { results: Array<{ from: { id: string }; to: Array<{ toObjectId: number | string }> }> };
+
+  // A deal with no line items is simply absent from the results (the
+  // endpoint answers 207 Multi-Status), so default to an empty list.
+  const lineItemIdsByDeal = new Map<string, string[]>();
+  for (const row of associations.results) {
+    lineItemIdsByDeal.set(row.from.id, row.to.map((t) => String(t.toObjectId)));
+  }
+
+  const allIds = [...new Set([...lineItemIdsByDeal.values()].flat())];
+  const itemsById = new Map<string, HubspotLineItemResponse>();
+  for (let i = 0; i < allIds.length; i += HUBSPOT_BATCH_LIMIT) {
+    const batch = (await hubspotFetch("/crm/v3/objects/line_items/batch/read", {
+      method: "POST",
+      body: JSON.stringify({
+        properties: LINE_ITEM_PROPERTIES,
+        inputs: allIds.slice(i, i + HUBSPOT_BATCH_LIMIT).map((id) => ({ id })),
+      }),
+    })) as { results: HubspotLineItemResponse[] };
+    for (const item of batch.results) {
+      itemsById.set(item.id, item);
+    }
+  }
+
+  return deals.map((deal) => {
+    const raw = (lineItemIdsByDeal.get(deal.dealId) ?? [])
+      .map((id) => itemsById.get(id))
+      .filter((item): item is HubspotLineItemResponse => item !== undefined);
+    try {
+      return { ...deal, lineItems: raw.map((item) => parseLineItem(deal.dealId, item)) };
+    } catch (err) {
+      return { ...deal, lineItems: [], lineItemsError: err instanceof Error ? err.message : String(err) };
+    }
+  });
 }
 
 // HubSpot's default association type ID for "line item to deal".
