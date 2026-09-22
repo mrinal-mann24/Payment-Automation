@@ -47,6 +47,16 @@ export function servicePeriod(monthKey: string): ServicePeriod {
   };
 }
 
+export interface BillingCycle {
+  key: string; // YYYY-MM — the renewal_jobs.billing_period of a monthly row
+  period: ServicePeriod;
+}
+
+export function currentBillingCycle(now: Date = new Date()): BillingCycle {
+  const key = billingMonthKey(now);
+  return { key, period: servicePeriod(key) };
+}
+
 // HubSpot returns date properties in two shapes: plain "YYYY-MM-DD" for
 // date fields and an epoch-ms string (UTC midnight) for calculated ones
 // such as billing_term_end_date. Both are calendar dates, so neither is

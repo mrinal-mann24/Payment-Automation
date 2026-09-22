@@ -35,7 +35,7 @@ const LINE_ITEM_PROPERTIES = [
 export interface HubspotDeal {
   dealId: string;
   dealName: string;
-  billingPeriod: string;
+  billingPeriod: string | null;
   contactEmail: string;
   contactName: string;
   contactPhone: string | null;
@@ -127,14 +127,12 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
     throw new Error(`HubSpot contact ${contactId} for deal ${dealId} has no email`);
   }
 
+  // Legacy (due-date-driven) cycle key. Monthly cycles are keyed by calendar
+  // month instead, so missing properties are only an error on the legacy
+  // path — createZohoEstimate decides, not this fetch.
   const billingCycle = deal.properties.billing_cycle;
   const nextRenewalDate = deal.properties.next_renewal_date;
-  if (!billingCycle || !nextRenewalDate) {
-    throw new Error(
-      `HubSpot deal ${dealId} is missing billing_cycle or next_renewal_date`,
-    );
-  }
-  const billingPeriod = `${billingCycle}-${nextRenewalDate}`;
+  const billingPeriod = billingCycle && nextRenewalDate ? `${billingCycle}-${nextRenewalDate}` : null;
 
   return {
     dealId: deal.id,

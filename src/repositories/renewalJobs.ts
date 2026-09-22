@@ -149,6 +149,7 @@ export async function markZohoStepDone(
   zohoEstimateId: string,
   zohoEstimateNumber: string,
   zohoEstimateTotal: number,
+  billed: { price: number; servicePeriodStart: string | null },
 ): Promise<void> {
   const { error } = await supabase
     .from("renewal_jobs")
@@ -156,6 +157,8 @@ export async function markZohoStepDone(
       zoho_estimate_id: zohoEstimateId,
       zoho_estimate_number: zohoEstimateNumber,
       zoho_estimate_total: zohoEstimateTotal,
+      billed_price: billed.price,
+      service_period_start: billed.servicePeriodStart,
       zoho_step_status: "done",
       status: "done",
       updated_at: new Date().toISOString(),

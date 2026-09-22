@@ -165,9 +165,15 @@ interface ZohoEstimateCreateResponse {
   };
 }
 
+// `cycle` marks a monthly billing cycle: the quote is always one
+// "Virtual Accounting" line with the service period as its description
+// (Zoho prints the item name bold and the description beneath it), and the
+// reference number carries the month so each cycle's estimate is
+// distinguishable in Zoho. Without it the legacy payload is unchanged.
 export async function createEstimate(
   customerId: string,
   deal: HubspotDeal,
+  cycle?: { key: string; narration: string },
 ): Promise<{ estimateId: string; estimateNumber: string; total: number }> {
   const params = new URLSearchParams({ organization_id: config.zoho.orgId });
 
@@ -176,16 +182,18 @@ export async function createEstimate(
     throw new Error(`HubSpot deal ${deal.dealId} has no line items`);
   }
 
+  const lineItem = cycle
+    ? { name: "Virtual Accounting", description: cycle.narration, rate: firstLineItem.price, quantity: 1 }
+    : { name: firstLineItem.name, rate: firstLineItem.price, quantity: firstLineItem.quantity };
+
   const result = (await zohoFetch(`/estimates?${params.toString()}`, {
     method: "POST",
     body: JSON.stringify({
       customer_id: customerId,
-      reference_number: deal.dealId,
+      reference_number: cycle ? `${deal.dealId}/${cycle.key}` : deal.dealId,
       line_items: [
         {
-          name: firstLineItem.name,
-          rate: firstLineItem.price,
-          quantity: firstLineItem.quantity,
+          ...lineItem,
           tax_id: GST18_TAX_ID,
           tds_tax_id: PROFESSIONAL_FEES_TDS_TAX_ID,
         },
