@@ -326,16 +326,24 @@ export interface RenewalLineItemInput {
   name: string;
   price: number;
   productId: string | null;
-  billingStartDate: string; // YYYY-MM-DD, first day of the paid month
+  billingStartDate: string; // YYYY-MM-DD, first day of the paid period
   datePaid: string; // YYYY-MM-DD
+  months: number; // 1, 3 or 6 — the paid term
 }
 
-// One complete "Renewal" line item per paid monthly cycle — the same shape
-// the team enters by hand (monthly, P1M, start = period start, Date Paid).
-// HubSpot then calculates billing_term_end_date (the 1st of the next
-// month), which is what the Neon mirror's due_on reflects. Returns the new
-// line item's id.
+// HubSpot's "Billing frequency" label for each term the team uses.
+const TERM_FREQUENCY: Record<number, string> = { 1: "monthly", 3: "quarterly", 6: "per_six_months" };
+
+// One complete "Renewal" line item per paid cycle — the same shape the team
+// enters by hand (frequency, term, start = period start, Date Paid). HubSpot
+// then calculates billing_term_end_date (the day the next cycle starts),
+// which is what the classifier and the Neon mirror's due_on read. Returns
+// the new line item's id.
 export async function createRenewalLineItem(dealId: string, input: RenewalLineItemInput): Promise<string> {
+  const frequency = TERM_FREQUENCY[input.months];
+  if (!frequency) {
+    throw new Error(`Cannot write a HubSpot line item for a ${input.months}-month term on deal ${dealId}`);
+  }
   const created = (await hubspotFetch(`/crm/v3/objects/line_items`, {
     method: "POST",
     body: JSON.stringify({
@@ -343,8 +351,8 @@ export async function createRenewalLineItem(dealId: string, input: RenewalLineIt
         name: input.name,
         quantity: "1",
         price: String(input.price),
-        recurringbillingfrequency: "monthly",
-        hs_recurring_billing_period: "P1M",
+        recurringbillingfrequency: frequency,
+        hs_recurring_billing_period: `P${input.months}M`,
         hs_recurring_billing_start_date: input.billingStartDate,
         date_renewed: input.datePaid,
         recurring_revenue_type: "Renewal",

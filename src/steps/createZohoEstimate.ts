@@ -84,14 +84,22 @@ export async function createZohoEstimate(
     // flow (src/steps/createAdditionCharge.ts), never folded into the
     // renewal total.
     const pricing = await findClientPricing(supabase, dealId);
-    if (cycle && !pricing) {
+    if (cycle && cycle.amount === null && !pricing) {
       throw new Error(
         `No client_pricing row for deal ${dealId}; refusing to guess a price for monthly cycle ${cycle.key}`,
       );
     }
 
     let dealForEstimate = deal;
-    if (pricing) {
+    if (cycle) {
+      // A billing cycle is always one "Virtual Accounting" line: a term
+      // cycle bills what the client paid last time, a monthly cycle the
+      // client_pricing base price.
+      dealForEstimate = {
+        ...deal,
+        lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price: cycle.amount ?? pricing!.base_price }],
+      };
+    } else if (pricing) {
       const firstLineItem = deal.lineItems[0];
       dealForEstimate = {
         ...deal,
@@ -107,14 +115,15 @@ export async function createZohoEstimate(
     }
 
     const customerId = await findOrCreateCustomer(deal.contactEmail, deal.contactName);
-    const estimateCycle = cycle ? { key: cycle.key, narration: cycle.period.narration } : undefined;
-    const { estimateId, estimateNumber, total } = await createEstimate(customerId, dealForEstimate, estimateCycle);
+    const estimateLine = cycle ? { key: cycle.key, description: cycle.period.narration } : undefined;
+    const { estimateId, estimateNumber, total } = await createEstimate(customerId, dealForEstimate, estimateLine);
 
     // createEstimate has already thrown if there was no line item to bill.
     const billedPrice = dealForEstimate.lineItems[0]!.price;
     await markZohoStepDone(supabase, job.id, estimateId, estimateNumber, total, {
       price: billedPrice,
       servicePeriodStart: cycle?.period.start ?? null,
+      termMonths: cycle?.months ?? null,
     });
     return {
       zohoEstimateId: estimateId,

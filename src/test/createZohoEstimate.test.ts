@@ -243,11 +243,12 @@ describe("createZohoEstimate with a monthly billing cycle", () => {
     expect(createEstimate).toHaveBeenCalledWith(
       "zcust-1",
       expect.objectContaining({ lineItems: [expect.objectContaining({ price: 5000 })] }),
-      { key: "2026-10", narration: octoberCycle.period.narration },
+      { key: "2026-10", description: octoberCycle.period.narration },
     );
     expect(markZohoStepDone).toHaveBeenCalledWith(fakeSupabase, "job-3", "zest-9", "QT-9", 5400, {
       price: 5000,
       servicePeriodStart: "2026-10-01",
+      termMonths: 1,
     });
     expect(addLineItemToDeal).not.toHaveBeenCalled();
     expect(result).toMatchObject({ zohoEstimateNumber: "QT-9", billingPeriod: "2026-10" });
@@ -277,6 +278,7 @@ describe("createZohoEstimate with a monthly billing cycle", () => {
     expect(markZohoStepDone).toHaveBeenCalledWith(fakeSupabase, "job-3", "zest-9", "QT-9", 5400, {
       price: 5000,
       servicePeriodStart: null,
+      termMonths: null,
     });
     expect(addLineItemToDeal).not.toHaveBeenCalled();
   });
@@ -287,5 +289,41 @@ describe("createZohoEstimate with a monthly billing cycle", () => {
     await expect(createZohoEstimate(fakeSupabase, "deal-1")).rejects.toThrow(/billing_cycle or next_renewal_date/);
 
     expect(createRenewalJob).not.toHaveBeenCalled();
+  });
+});
+
+const quarterlyCycle = {
+  key: "2026-10-09",
+  period: {
+    start: "2026-10-09",
+    end: "2027-01-08",
+    narration: "Service period: 9 October 2026 to 8 January 2027",
+  },
+  months: 3,
+  amount: 39000,
+};
+
+describe("createZohoEstimate with a term (quarterly) cycle", () => {
+  it("keys the row by the period start and bills the cycle amount (what the client paid last time), no pricing row needed", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue({ ...pendingCycleJob, billing_period: "2026-10-09" });
+    vi.mocked(findClientPricing).mockResolvedValue(null);
+    vi.mocked(findOrCreateCustomer).mockResolvedValue("zcust-1");
+    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-q", estimateNumber: "QT-Q", total: 42120 });
+
+    const result = await createZohoEstimate(fakeSupabase, "deal-1", quarterlyCycle);
+
+    expect(createRenewalJob).toHaveBeenCalledWith(fakeSupabase, "deal-1", "2026-10-09");
+    expect(createEstimate).toHaveBeenCalledWith(
+      "zcust-1",
+      expect.objectContaining({ lineItems: [expect.objectContaining({ price: 39000, quantity: 1 })] }),
+      { key: "2026-10-09", description: quarterlyCycle.period.narration },
+    );
+    expect(markZohoStepDone).toHaveBeenCalledWith(fakeSupabase, "job-3", "zest-q", "QT-Q", 42120, {
+      price: 39000,
+      servicePeriodStart: "2026-10-09",
+      termMonths: 3,
+    });
+    expect(result).toMatchObject({ zohoEstimateNumber: "QT-Q", billingPeriod: "2026-10-09" });
   });
 });

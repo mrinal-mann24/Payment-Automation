@@ -181,6 +181,7 @@ describe("markRenewalDone for a monthly cycle", () => {
       productId: "prod-1",
       billingStartDate: "2026-10-01",
       datePaid: "2026-10-03",
+      months: 1,
     });
     expect(saveHubspotLineItemId).toHaveBeenCalledWith(fakeSupabase, "job-1", "li-new");
     expect(vi.mocked(saveHubspotLineItemId).mock.invocationCallOrder[0]).toBeLessThan(
@@ -224,5 +225,44 @@ describe("markRenewalDone for a monthly cycle", () => {
       price: 34000,
     });
     expect(createRenewalLineItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("markRenewalDone for a quarterly term cycle", () => {
+  it("writes one complete quarterly Renewal line item starting the day the last term ended, priced at what was billed", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      ...fakeDeal,
+      lineItems: [
+        {
+          ...previousItem,
+          recurringBillingFrequency: "quarterly",
+          billingPeriodTerm: "P3M",
+          billingStartDate: "2026-07-09",
+          billingTermEndDate: "2026-10-09",
+        },
+      ],
+    });
+    vi.mocked(createRenewalLineItem).mockResolvedValue("li-q");
+    vi.mocked(findRenewalJob).mockResolvedValue({
+      ...monthlyJob,
+      billing_period: "2026-10-09",
+      service_period_start: "2026-10-09",
+      term_months: 3,
+      billed_price: 39000,
+      payment_date: "2026-10-10",
+    });
+
+    await markRenewalDone(fakeSupabase, "deal-1", "2026-10-09");
+
+    expect(createRenewalLineItem).toHaveBeenCalledWith("deal-1", {
+      name: "Bookkeeping + GST + TDS Services VA",
+      price: 39000,
+      productId: "prod-1",
+      billingStartDate: "2026-10-09",
+      datePaid: "2026-10-10",
+      months: 3,
+    });
+    expect(saveHubspotLineItemId).toHaveBeenCalledWith(fakeSupabase, "job-1", "li-q");
+    expect(addLineItemToDeal).not.toHaveBeenCalled();
   });
 });

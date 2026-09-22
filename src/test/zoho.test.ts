@@ -50,7 +50,7 @@ describe("createEstimate", () => {
 
     const result = await createEstimate("zcust-1", deal, {
       key: "2026-10",
-      narration: "Service period: 1 October 2026 to 31 October 2026",
+      description: "Service period: 1 October 2026 to 31 October 2026",
     });
 
     expect(result).toEqual({ estimateId: "zest-1", estimateNumber: "QT-1", total: 5400 });
@@ -106,5 +106,32 @@ describe("emailEstimate / emailInvoice", () => {
     expect(calls[0]!.body).toEqual({ to_mail_ids: ["client@example.com"], subject: "Quote QT-1", body: "Hello" });
     expect(calls[1]!.path).toBe("https://www.zohoapis.in/books/v3/invoices/zinv-1/email?organization_id=org-1");
     expect(calls[1]!.body).toEqual({ to_mail_ids: ["client@example.com"], subject: "Invoice INV-1", body: "Thanks" });
+  });
+});
+
+describe("createEstimate for a one-time quote", () => {
+  it("bills it under its own service name and narration, with a per-quote reference", async () => {
+    const captured = mockZohoFetch();
+
+    await createEstimate("zcust-1", { ...deal, lineItems: [{ id: "", name: "ignored", quantity: 1, price: 2500 }] }, {
+      key: "addition-row-1",
+      name: "Site visit",
+      description: "Visit to the Pune office on 12 October",
+    });
+
+    expect(captured.body).toMatchObject({
+      reference_number: "deal-1/addition-row-1",
+      line_items: [{ name: "Site visit", description: "Visit to the Pune office on 12 October", rate: 2500, quantity: 1 }],
+    });
+  });
+
+  it("leaves the description out when there is no narration", async () => {
+    const captured = mockZohoFetch();
+
+    await createEstimate("zcust-1", deal, { key: "addition-row-2", name: "Site visit", description: null });
+
+    const lineItem = (captured.body!.line_items as Array<Record<string, unknown>>)[0]!;
+    expect(lineItem).toMatchObject({ name: "Site visit", quantity: 1 });
+    expect(lineItem).not.toHaveProperty("description");
   });
 });

@@ -165,15 +165,20 @@ interface ZohoEstimateCreateResponse {
   };
 }
 
-// `cycle` marks a monthly billing cycle: the quote is always one
-// "Virtual Accounting" line with the service period as its description
-// (Zoho prints the item name bold and the description beneath it), and the
-// reference number carries the month so each cycle's estimate is
-// distinguishable in Zoho. Without it the legacy payload is unchanged.
+export interface EstimateLine {
+  key: string; // suffix of the Zoho reference number: "<dealId>/<key>"
+  name?: string; // line item name; "Virtual Accounting" for a billing cycle
+  description?: string | null; // printed beneath the name (service period / narration)
+}
+
+// `line` marks a billing cycle or a one-time quote: one line item, named
+// (bold in Zoho's PDF) with the description beneath it, and a reference
+// number that makes each quote distinguishable in Zoho. Without it the
+// legacy payload is unchanged.
 export async function createEstimate(
   customerId: string,
   deal: HubspotDeal,
-  cycle?: { key: string; narration: string },
+  line?: EstimateLine,
 ): Promise<{ estimateId: string; estimateNumber: string; total: number }> {
   const params = new URLSearchParams({ organization_id: config.zoho.orgId });
 
@@ -182,15 +187,20 @@ export async function createEstimate(
     throw new Error(`HubSpot deal ${deal.dealId} has no line items`);
   }
 
-  const lineItem = cycle
-    ? { name: "Virtual Accounting", description: cycle.narration, rate: firstLineItem.price, quantity: 1 }
+  const lineItem = line
+    ? {
+        name: line.name ?? "Virtual Accounting",
+        ...(line.description ? { description: line.description } : {}),
+        rate: firstLineItem.price,
+        quantity: 1,
+      }
     : { name: firstLineItem.name, rate: firstLineItem.price, quantity: firstLineItem.quantity };
 
   const result = (await zohoFetch(`/estimates?${params.toString()}`, {
     method: "POST",
     body: JSON.stringify({
       customer_id: customerId,
-      reference_number: cycle ? `${deal.dealId}/${cycle.key}` : deal.dealId,
+      reference_number: line ? `${deal.dealId}/${line.key}` : deal.dealId,
       line_items: [
         {
           ...lineItem,

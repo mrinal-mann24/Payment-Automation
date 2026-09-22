@@ -34,7 +34,7 @@ export async function markRenewalDone(
   const deal = await fetchDealWithLineItemsAndContact(dealId);
 
   if (job.service_period_start) {
-    // Monthly cycle: exactly one complete Renewal line item per paid month,
+    // Billing cycle: exactly one complete Renewal line item per paid cycle,
     // recorded on the row before the stage move so a crash in between can
     // never produce a second one.
     if (!job.hubspot_line_item_id) {
@@ -87,5 +87,6 @@ async function ensureRenewalLineItem(dealId: string, deal: HubspotDeal, job: Ren
     productId: latest?.productId ?? null,
     billingStartDate: periodStart,
     datePaid: job.payment_date ?? istToday(),
+    months: job.term_months ?? 1,
   });
 }
