@@ -31,30 +31,54 @@ export interface ServicePeriod {
 }
 
 export function servicePeriod(monthKey: string): ServicePeriod {
-  const match = monthKey.match(/^(\d{4})-(\d{2})$/);
-  if (!match) {
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) {
     throw new Error(`Billing month key must be YYYY-MM, got "${monthKey}"`);
   }
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const monthName = MONTH_NAMES[month - 1];
+  return servicePeriodFrom(`${monthKey}-01`, 1);
+}
 
-  return {
-    start: `${monthKey}-01`,
-    end: `${monthKey}-${String(lastDay).padStart(2, "0")}`,
-    narration: `Service period: 1 ${monthName} ${year} to ${lastDay} ${monthName} ${year}`,
-  };
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function longDate(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  return `${day} ${MONTH_NAMES[month! - 1]} ${year}`;
+}
+
+// A service period of `months` months starting on `start` (YYYY-MM-DD):
+// it ends the day before the same day-of-month `months` later, clamped to
+// the last day of a shorter month. Started on the 1st for one month it is
+// exactly the calendar month.
+export function servicePeriodFrom(start: string, months: number): ServicePeriod {
+  const [year, month, day] = start.split("-").map(Number);
+  const lastDayOfTarget = new Date(Date.UTC(year!, month! - 1 + months + 1, 0)).getUTCDate();
+  const endExclusive = Date.UTC(year!, month! - 1 + months, Math.min(day!, lastDayOfTarget));
+  const end = isoDate(new Date(endExclusive - 86_400_000));
+  return { start, end, narration: `Service period: ${longDate(start)} to ${longDate(end)}` };
 }
 
 export interface BillingCycle {
-  key: string; // YYYY-MM — the renewal_jobs.billing_period of a monthly row
+  key: string; // renewal_jobs.billing_period: YYYY-MM for a monthly cycle, the start date for a term cycle
   period: ServicePeriod;
+  months: number; // 1 = calendar month, 3 = quarterly, 6 = half-yearly
+  amount: number | null; // pre-tax amount to bill; null = the deal's client_pricing base price (monthly)
 }
 
 export function currentBillingCycle(now: Date = new Date()): BillingCycle {
   const key = billingMonthKey(now);
-  return { key, period: servicePeriod(key) };
+  return { key, period: servicePeriod(key), months: 1, amount: null };
+}
+
+// A quarterly / half-yearly cycle starts the day the client's last term
+// ended (HubSpot's billing end date is exclusive) and bills what they paid
+// last time.
+export function termBillingCycle(periodStart: string, months: number, amount: number): BillingCycle {
+  return { key: periodStart, period: servicePeriodFrom(periodStart, months), months, amount };
+}
+
+export function daysBetween(fromIso: string, toIso: string): number {
+  return Math.round((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / 86_400_000);
 }
 
 // HubSpot returns date properties in two shapes: plain "YYYY-MM-DD" for

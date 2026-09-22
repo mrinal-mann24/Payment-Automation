@@ -3,10 +3,8 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { getSupabaseClient } from "../clients/supabase.js";
 import { config } from "../config.js";
-import { fetchDealStage, fetchVaDealsWithLineItems, VA_ACTIVE_CUSTOMER_DEALSTAGES } from "../clients/hubspot.js";
-import { runRenewalPipeline } from "../jobs/renewalPipeline.js";
-import { currentBillingCycle } from "../utils/billingCycle.js";
-import { classifyDeal, type DealClassification } from "../utils/monthlyEligibility.js";
+import { fetchDealStage, VA_ACTIVE_CUSTOMER_DEALSTAGES } from "../clients/hubspot.js";
+import { generateRenewalQuote, QuoteNotDueError } from "../jobs/generateRenewalQuote.js";
 
 const renewalWebhookSchema = z.object({
   deal_id: z.string().min(1),
@@ -66,29 +64,22 @@ renewalWebhookRouter.post("/webhooks/renewal", async (req: Request, res: Respons
       return;
     }
 
-    // Same classification as the daily tick: a monthly deal gets the current
-    // IST month's cycle (so this route doubles as "generate now" after the
-    // 1st-4th window); anything else runs the legacy due-date flow.
-    const cycle = currentBillingCycle();
-    const listed = (await fetchVaDealsWithLineItems()).find((deal) => deal.dealId === dealId);
-    const classification: DealClassification = listed
-      ? classifyDeal(listed, cycle.period.start)
-      : { monthly: false, reason: "deal is not in the active VA deal list" };
-    if (classification.monthly && !classification.due) {
-      console.log(`[renewalWebhook] deal ${dealId} rejected: ${classification.reason}`);
-      res.status(409).json({ error: "Monthly deal is not due for this month", reason: classification.reason });
-      return;
-    }
-
-    const result = await runRenewalPipeline(supabase, dealId, classification.monthly ? cycle : undefined);
+    // Same classification as the daily tick, without its catch-up window —
+    // this route doubles as "generate now" for a cycle the tick missed.
+    const { kind, result } = await generateRenewalQuote(supabase, dealId);
     console.log(
-      `[renewalWebhook] deal ${dealId} (${classification.monthly ? "monthly" : "legacy"}) -> estimate ${result.zohoEstimateNumber}, ` +
+      `[renewalWebhook] deal ${dealId} (${kind}) -> estimate ${result.zohoEstimateNumber}, ` +
         `link ${result.shortUrl}, WhatsApp ${result.periskopeSent ? "sent" : `skipped: ${result.periskopeSkipReason}`}, ` +
         `email ${result.emailSent ? "sent" : `not sent: ${result.emailError}`}`,
     );
 
-    res.status(200).json({ monthly: classification.monthly, ...result });
+    res.status(200).json({ kind, ...result });
   } catch (err) {
+    if (err instanceof QuoteNotDueError) {
+      console.log(`[renewalWebhook] deal ${dealId} rejected: ${err.message}`);
+      res.status(409).json({ error: "Deal is not due for a quote", reason: err.message });
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[renewalWebhook] deal ${dealId} failed: ${message}`);
     res.status(502).json({ error: "Failed to run renewal pipeline", details: message });

@@ -19,6 +19,8 @@ const fakeSupabase = {} as SupabaseClient;
 const octoberCycle = {
   key: "2026-10",
   period: { start: "2026-10-01", end: "2026-10-31", narration: "Service period: 1 October 2026 to 31 October 2026" },
+  months: 1,
+  amount: null,
 };
 
 beforeEach(() => {

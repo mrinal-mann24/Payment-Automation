@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailEstimate } from "../clients/zoho.js";
 import { findRenewalJob, markEmailError, markEstimateEmailSent } from "../repositories/renewalJobs.js";
-import { servicePeriod } from "../utils/billingCycle.js";
+import { servicePeriodFrom } from "../utils/billingCycle.js";
 
 export interface SendEmailResult {
   sent: boolean;
@@ -39,7 +39,7 @@ export async function sendQuoteEmail(
 
   try {
     const deal = await fetchDealWithLineItemsAndContact(dealId);
-    const period = job.service_period_start ? servicePeriod(job.billing_period).narration : null;
+    const period = job.service_period_start ? servicePeriodFrom(job.service_period_start, job.term_months ?? 1).narration : null;
 
     await emailEstimate(job.zoho_estimate_id, {
       to: deal.contactEmail,

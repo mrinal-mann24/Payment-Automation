@@ -4,13 +4,13 @@ import { fetchDealStage, VA_ACTIVE_CUSTOMER_DEALSTAGES } from "../clients/hubspo
 import { istToday } from "../utils/billingCycle.js";
 import { runRenewalPipeline } from "./renewalPipeline.js";
 
-// Legacy due-date flow for deals that are NOT on a monthly cycle
-// (quarterly, annual, or mismatched HubSpot data). `monthlyDealIds` comes
-// from the same per-tick classification the monthly generator uses: a
-// monthly deal's paid line item ends on the 1st of the next month, so Neon
-// reports it as "due today" on the 1st, and it must be skipped here or it
+// Legacy due-date flow for deals that no billing cycle owns (yearly, no
+// usable line item). `cycleDealIds` comes
+// from the same per-tick classification the cycle generator uses: a
+// cycle deal's paid line item ends the day its next cycle starts, so Neon
+// reports it as "due today" that day, and it must be skipped here or it
 // would be quoted twice under two different keys.
-export async function runRenewalCheck(monthlyDealIds: Set<string>, now: Date = new Date()): Promise<void> {
+export async function runRenewalCheck(cycleDealIds: Set<string>, now: Date = new Date()): Promise<void> {
   const dueDeals = await findDealsWithRenewalDueToday(istToday(now));
   console.log(`[renewalCron] ${dueDeals.length} deal(s) due for renewal today`);
 
@@ -18,8 +18,8 @@ export async function runRenewalCheck(monthlyDealIds: Set<string>, now: Date = n
 
   for (const deal of dueDeals) {
     try {
-      if (monthlyDealIds.has(deal.dealId)) {
-        console.log(`[renewalCron] deal ${deal.dealId} (${deal.dealName}) -> skipped, billed by the monthly cycle`);
+      if (cycleDealIds.has(deal.dealId)) {
+        console.log(`[renewalCron] deal ${deal.dealId} (${deal.dealName}) -> skipped, billed by its billing cycle`);
         continue;
       }
 

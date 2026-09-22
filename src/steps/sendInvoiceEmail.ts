@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailInvoice } from "../clients/zoho.js";
 import { findRenewalJob, markEmailError, markInvoiceEmailSent } from "../repositories/renewalJobs.js";
-import { servicePeriod } from "../utils/billingCycle.js";
+import { servicePeriodFrom } from "../utils/billingCycle.js";
 import type { SendEmailResult } from "./sendQuoteEmail.js";
 
 // Best-effort, same contract as sendQuoteEmail: failures are recorded and
@@ -28,7 +28,7 @@ export async function sendInvoiceEmail(
 
   try {
     const deal = await fetchDealWithLineItemsAndContact(dealId);
-    const period = job.service_period_start ? servicePeriod(job.billing_period).narration : null;
+    const period = job.service_period_start ? servicePeriodFrom(job.service_period_start, job.term_months ?? 1).narration : null;
 
     await emailInvoice(job.zoho_invoice_id, {
       to: deal.contactEmail,

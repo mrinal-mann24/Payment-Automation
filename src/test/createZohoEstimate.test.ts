@@ -216,6 +216,8 @@ const octoberCycle = {
     end: "2026-10-31",
     narration: "Service period: 1 October 2026 to 31 October 2026",
   },
+  months: 1,
+  amount: null,
 };
 
 const pricingRow = {
