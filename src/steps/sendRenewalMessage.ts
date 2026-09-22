@@ -1,12 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { getEstimatePdf } from "../clients/zoho.js";
-import { isValidWhatsappPhone, sendDocumentMessage } from "../clients/periskope.js";
+import { sendDocumentMessage } from "../clients/periskope.js";
 import {
   findRenewalJob,
   markPeriskopeSent,
   markPeriskopeSkipped,
 } from "../repositories/renewalJobs.js";
+import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 
 export interface SendRenewalMessageResult {
   sent: boolean;
@@ -41,18 +42,16 @@ export async function sendRenewalMessage(
 
   const deal = await fetchDealWithLineItemsAndContact(dealId);
 
-  if (!deal.contactPhone || !isValidWhatsappPhone(deal.contactPhone)) {
-    const reason = deal.contactPhone
-      ? `Contact phone for deal ${dealId} is not a valid WhatsApp number: ${deal.contactPhone}`
-      : `No WhatsApp identifier (contact phone) found for deal ${dealId}`;
-    await markPeriskopeSkipped(supabase, job.id, reason);
-    return { sent: false, skipReason: reason };
+  const target = await resolveWhatsappRecipient(supabase, dealId, deal.contactPhone);
+  if (target.recipient === null) {
+    await markPeriskopeSkipped(supabase, job.id, target.skipReason);
+    return { sent: false, skipReason: target.skipReason };
   }
 
   const pdf = await getEstimatePdf(job.zoho_estimate_id);
   const message = `Your renewal quote (${job.zoho_estimate_number}) is ready. Pay here: ${job.razorpay_short_url}`;
 
-  await sendDocumentMessage(deal.contactPhone, message, {
+  await sendDocumentMessage(target.recipient, message, {
     base64: pdf.toString("base64"),
     filename: `${job.zoho_estimate_number}.pdf`,
     mimetype: "application/pdf",

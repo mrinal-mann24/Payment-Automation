@@ -9,7 +9,7 @@ vi.mock("../clients/zoho.js", () => ({
 }));
 vi.mock("../clients/periskope.js", () => ({
   sendDocumentMessage: vi.fn(),
-  isValidWhatsappPhone: vi.fn(),
+  isValidWhatsappRecipient: vi.fn(),
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
   findRenewalJob: vi.fn(),
@@ -17,9 +17,14 @@ vi.mock("../repositories/renewalJobs.js", () => ({
   markPeriskopeSkipped: vi.fn(),
 }));
 
+vi.mock("../repositories/clients.js", () => ({
+  findWhatsappGroupId: vi.fn(),
+}));
+
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
+import { findWhatsappGroupId } from "../repositories/clients.js";
 import { getEstimatePdf } from "../clients/zoho.js";
-import { isValidWhatsappPhone, sendDocumentMessage } from "../clients/periskope.js";
+import { isValidWhatsappRecipient, sendDocumentMessage } from "../clients/periskope.js";
 import {
   findRenewalJob,
   markPeriskopeSent,
@@ -82,7 +87,8 @@ const fakeDeal = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isValidWhatsappPhone).mockReturnValue(true);
+  vi.mocked(isValidWhatsappRecipient).mockReturnValue(true);
+  vi.mocked(findWhatsappGroupId).mockResolvedValue(null);
 });
 
 describe("sendRenewalMessage", () => {
@@ -143,5 +149,31 @@ describe("sendRenewalMessage", () => {
 
     expect(result.sent).toBe(false);
     expect(fetchDealWithLineItemsAndContact).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendRenewalMessage recipient", () => {
+  it("sends to the WhatsApp group from the clients table when one exists", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(getEstimatePdf).mockResolvedValue(Buffer.from("pdf-bytes"));
+    vi.mocked(findWhatsappGroupId).mockResolvedValue("120363012345678901");
+
+    await sendRenewalMessage(fakeSupabase, "deal-1", "2026-07");
+
+    expect(findWhatsappGroupId).toHaveBeenCalledWith(fakeSupabase, "deal-1");
+    expect(sendDocumentMessage).toHaveBeenCalledWith("120363012345678901", expect.any(String), expect.any(Object));
+  });
+
+  it("falls back to the contact phone when the group lookup fails", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(getEstimatePdf).mockResolvedValue(Buffer.from("pdf-bytes"));
+    vi.mocked(findWhatsappGroupId).mockRejectedValue(new Error("clients lookup failed"));
+
+    const result = await sendRenewalMessage(fakeSupabase, "deal-1", "2026-07");
+
+    expect(result.sent).toBe(true);
+    expect(sendDocumentMessage).toHaveBeenCalledWith("919876543210", expect.any(String), expect.any(Object));
   });
 });

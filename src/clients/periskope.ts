@@ -11,11 +11,31 @@ export function isValidWhatsappPhone(phone: string): boolean {
   return digits.length === 10 || (digits.length === 12 && digits.startsWith("91"));
 }
 
-function toChatId(phone: string): string {
-  if (!isValidWhatsappPhone(phone)) {
-    throw new Error(`Not a valid WhatsApp phone number: ${phone}`);
+const GROUP_JID_SUFFIX = "@g.us";
+
+// A WhatsApp group id is either a bare 18-digit id (how the clients table
+// stores them) or a full group JID already ending in "@g.us" (older ids look
+// like "<digits>-<digits>@g.us"). A phone has at most 12 digits, so the two
+// can never be confused.
+export function isValidWhatsappGroupId(value: string): boolean {
+  return value.endsWith(GROUP_JID_SUFFIX) || /^\d{18}$/.test(value);
+}
+
+export function isValidWhatsappRecipient(value: string): boolean {
+  return isValidWhatsappGroupId(value) || isValidWhatsappPhone(value);
+}
+
+function toChatId(recipient: string): string {
+  if (recipient.endsWith(GROUP_JID_SUFFIX)) {
+    return recipient;
   }
-  const digits = phone.replace(/\D/g, "");
+  if (isValidWhatsappGroupId(recipient)) {
+    return `${recipient}${GROUP_JID_SUFFIX}`;
+  }
+  if (!isValidWhatsappPhone(recipient)) {
+    throw new Error(`Not a valid WhatsApp phone number or group id: ${recipient}`);
+  }
+  const digits = recipient.replace(/\D/g, "");
   // Bare 10-digit numbers are Indian local numbers with no country code
   // (e.g. HubSpot's `phone` property) — prepend 91 so the WhatsApp JID
   // resolves to the right country instead of an arbitrary short code.
@@ -23,7 +43,8 @@ function toChatId(phone: string): string {
   return `${withCountryCode}@c.us`;
 }
 
-export async function sendTextMessage(phone: string, message: string): Promise<void> {
+// `recipient` is a phone number or a group id (see toChatId).
+export async function sendTextMessage(recipient: string, message: string): Promise<void> {
   const response = await fetch(`${PERISKOPE_BASE_URL}/message/send`, {
     method: "POST",
     headers: {
@@ -32,7 +53,7 @@ export async function sendTextMessage(phone: string, message: string): Promise<v
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      chat_id: toChatId(phone),
+      chat_id: toChatId(recipient),
       message,
     }),
   });

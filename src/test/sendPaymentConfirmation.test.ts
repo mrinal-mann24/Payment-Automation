@@ -9,7 +9,7 @@ vi.mock("../clients/zoho.js", () => ({
 }));
 vi.mock("../clients/periskope.js", () => ({
   sendDocumentMessage: vi.fn(),
-  isValidWhatsappPhone: vi.fn(),
+  isValidWhatsappRecipient: vi.fn(),
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
   findRenewalJob: vi.fn(),
@@ -17,9 +17,14 @@ vi.mock("../repositories/renewalJobs.js", () => ({
   markPaymentConfirmedSkipped: vi.fn(),
 }));
 
+vi.mock("../repositories/clients.js", () => ({
+  findWhatsappGroupId: vi.fn(),
+}));
+
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
+import { findWhatsappGroupId } from "../repositories/clients.js";
 import { getInvoicePdf } from "../clients/zoho.js";
-import { isValidWhatsappPhone, sendDocumentMessage } from "../clients/periskope.js";
+import { isValidWhatsappRecipient, sendDocumentMessage } from "../clients/periskope.js";
 import {
   findRenewalJob,
   markPaymentConfirmedSent,
@@ -82,7 +87,8 @@ const fakeDeal = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isValidWhatsappPhone).mockReturnValue(true);
+  vi.mocked(isValidWhatsappRecipient).mockReturnValue(true);
+  vi.mocked(findWhatsappGroupId).mockResolvedValue(null);
 });
 
 describe("sendPaymentConfirmation", () => {
@@ -131,5 +137,18 @@ describe("sendPaymentConfirmation", () => {
 
     expect(result).toEqual({ sent: true, skipReason: null });
     expect(sendDocumentMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendPaymentConfirmation recipient", () => {
+  it("sends the invoice to the WhatsApp group from the clients table when one exists", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(getInvoicePdf).mockResolvedValue(Buffer.from("pdf-bytes"));
+    vi.mocked(findWhatsappGroupId).mockResolvedValue("120363012345678901");
+
+    await sendPaymentConfirmation(fakeSupabase, "deal-1", "2026-07");
+
+    expect(sendDocumentMessage).toHaveBeenCalledWith("120363012345678901", expect.any(String), expect.any(Object));
   });
 });

@@ -1,12 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { getInvoicePdf } from "../clients/zoho.js";
-import { isValidWhatsappPhone, sendDocumentMessage } from "../clients/periskope.js";
+import { sendDocumentMessage } from "../clients/periskope.js";
 import {
   findRenewalJob,
   markPaymentConfirmedSent,
   markPaymentConfirmedSkipped,
 } from "../repositories/renewalJobs.js";
+import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 
 export interface SendPaymentConfirmationResult {
   sent: boolean;
@@ -38,18 +39,16 @@ export async function sendPaymentConfirmation(
 
   const deal = await fetchDealWithLineItemsAndContact(dealId);
 
-  if (!deal.contactPhone || !isValidWhatsappPhone(deal.contactPhone)) {
-    const reason = deal.contactPhone
-      ? `Contact phone for deal ${dealId} is not a valid WhatsApp number: ${deal.contactPhone}`
-      : `No WhatsApp identifier (contact phone) found for deal ${dealId}`;
-    await markPaymentConfirmedSkipped(supabase, job.id, reason);
-    return { sent: false, skipReason: reason };
+  const target = await resolveWhatsappRecipient(supabase, dealId, deal.contactPhone);
+  if (target.recipient === null) {
+    await markPaymentConfirmedSkipped(supabase, job.id, target.skipReason);
+    return { sent: false, skipReason: target.skipReason };
   }
 
   const pdf = await getInvoicePdf(job.zoho_invoice_id);
   const message = `Payment received, thank you! Your invoice (${job.zoho_invoice_number}) has been generated.`;
 
-  await sendDocumentMessage(deal.contactPhone, message, {
+  await sendDocumentMessage(target.recipient, message, {
     base64: pdf.toString("base64"),
     filename: `${job.zoho_invoice_number}.pdf`,
     mimetype: "application/pdf",

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendDocumentMessage } from "../clients/periskope.js";
+import { isValidWhatsappRecipient, sendDocumentMessage, sendTextMessage } from "../clients/periskope.js";
 
 const originalFetch = global.fetch;
 
@@ -73,5 +73,35 @@ describe("sendDocumentMessage", () => {
         mimetype: "application/pdf",
       }),
     ).rejects.toThrow("Periskope API error 401");
+  });
+});
+
+describe("group recipients", () => {
+  it("sends to an 18-digit group id as <id>@g.us and passes an existing @g.us id through", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: "queued" }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await sendTextMessage("120363012345678901", "hello");
+    await sendTextMessage("919876543210-1612345678@g.us", "hello");
+
+    const chatIds = fetchMock.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string).chat_id);
+    expect(chatIds).toEqual(["120363012345678901@g.us", "919876543210-1612345678@g.us"]);
+  });
+
+  it("rejects a value that is neither a phone number nor a group id", async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(sendTextMessage("123456789012345", "hello")).rejects.toThrow(/Not a valid WhatsApp/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("isValidWhatsappRecipient accepts phones and group ids only", () => {
+    expect(isValidWhatsappRecipient("120363012345678901")).toBe(true);
+    expect(isValidWhatsappRecipient("919876543210-1612345678@g.us")).toBe(true);
+    expect(isValidWhatsappRecipient("9876543210")).toBe(true);
+    expect(isValidWhatsappRecipient("919876543210")).toBe(true);
+    expect(isValidWhatsappRecipient("123456789012345")).toBe(false);
+    expect(isValidWhatsappRecipient("")).toBe(false);
   });
 });

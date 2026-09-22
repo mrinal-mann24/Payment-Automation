@@ -6,7 +6,7 @@ vi.mock("../clients/hubspot.js", () => ({
 }));
 vi.mock("../clients/periskope.js", () => ({
   sendTextMessage: vi.fn(),
-  isValidWhatsappPhone: vi.fn(),
+  isValidWhatsappRecipient: vi.fn(),
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
   findRenewalJob: vi.fn(),
@@ -14,8 +14,13 @@ vi.mock("../repositories/renewalJobs.js", () => ({
   markReminderSkipped: vi.fn(),
 }));
 
+vi.mock("../repositories/clients.js", () => ({
+  findWhatsappGroupId: vi.fn(),
+}));
+
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
-import { isValidWhatsappPhone, sendTextMessage } from "../clients/periskope.js";
+import { findWhatsappGroupId } from "../repositories/clients.js";
+import { isValidWhatsappRecipient, sendTextMessage } from "../clients/periskope.js";
 import { findRenewalJob, markReminderSent, markReminderSkipped } from "../repositories/renewalJobs.js";
 import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
 
@@ -74,7 +79,8 @@ const fakeDeal = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isValidWhatsappPhone).mockReturnValue(true);
+  vi.mocked(isValidWhatsappRecipient).mockReturnValue(true);
+  vi.mocked(findWhatsappGroupId).mockResolvedValue(null);
 });
 
 describe("sendOverdueReminder", () => {
@@ -142,5 +148,17 @@ describe("sendOverdueReminder", () => {
 
     expect(result).toEqual({ sent: true, skipReason: null });
     expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendOverdueReminder recipient", () => {
+  it("sends the reminder to the WhatsApp group from the clients table when one exists", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(findWhatsappGroupId).mockResolvedValue("120363012345678901");
+
+    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
+
+    expect(sendTextMessage).toHaveBeenCalledWith("120363012345678901", expect.any(String));
   });
 });

@@ -1,12 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
-import { isValidWhatsappPhone, sendTextMessage } from "../clients/periskope.js";
+import { sendTextMessage } from "../clients/periskope.js";
 import {
   findRenewalJob,
   markReminderSent,
   markReminderSkipped,
   type ReminderStage,
 } from "../repositories/renewalJobs.js";
+import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 
 export interface SendOverdueReminderResult {
   sent: boolean;
@@ -57,15 +58,13 @@ export async function sendOverdueReminder(
 
   const deal = await fetchDealWithLineItemsAndContact(dealId);
 
-  if (!deal.contactPhone || !isValidWhatsappPhone(deal.contactPhone)) {
-    const reason = deal.contactPhone
-      ? `Contact phone for deal ${dealId} is not a valid WhatsApp number: ${deal.contactPhone}`
-      : `No WhatsApp identifier (contact phone) found for deal ${dealId}`;
-    await markReminderSkipped(supabase, job.id, reason);
-    return { sent: false, skipReason: reason };
+  const target = await resolveWhatsappRecipient(supabase, dealId, deal.contactPhone);
+  if (target.recipient === null) {
+    await markReminderSkipped(supabase, job.id, target.skipReason);
+    return { sent: false, skipReason: target.skipReason };
   }
 
-  await sendTextMessage(deal.contactPhone, reminderMessage(stage, job.razorpay_short_url));
+  await sendTextMessage(target.recipient, reminderMessage(stage, job.razorpay_short_url));
 
   await markReminderSent(supabase, job.id, stage);
   return { sent: true, skipReason: null };
