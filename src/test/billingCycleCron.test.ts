@@ -24,26 +24,26 @@ const item = (overrides: Partial<HubspotLineItem> = {}): HubspotLineItem => ({
   ...overrides,
 });
 
-const quarterlyEnding = (end: string): HubspotLineItem =>
-  item({ id: "li-q", recurringBillingFrequency: "quarterly", billingPeriodTerm: "P3M", billingTermEndDate: end, price: 39000 });
+const quarterlyItem = item({ id: "li-q", recurringBillingFrequency: "quarterly", billingPeriodTerm: "P3M", price: 39000 });
 
-const deal = (dealId: string, lineItems: HubspotLineItem[], billingCycle = "Monthly"): VaDealWithLineItems => ({
+const deal = (dealId: string, nextRenewalDate: string | null, lineItems: HubspotLineItem[]): VaDealWithLineItems => ({
   dealId,
   dealName: `${dealId} <> VA`,
   dealStage: "3102360263",
-  billingCycle,
+  billingCycle: "Monthly",
+  nextRenewalDate,
   lineItems,
 });
 
 const deals: VaDealWithLineItems[] = [
-  deal("due-1", [item()]),
-  deal("due-2", [item()]),
-  deal("annual", [item({ recurringBillingFrequency: "annually", billingPeriodTerm: "P1Y" })], "Annual"),
-  deal("prepaid", [item({ billingTermEndDate: "2026-11-01" })]),
-  deal("quarterly-today", [quarterlyEnding("2026-10-01")], "Quarterly"),
-  deal("quarterly-stale", [quarterlyEnding("2026-08-10")]),
-  deal("quarterly-future", [quarterlyEnding("2026-10-09")], "Quarterly"),
-  deal("seven-month", [item({ billingPeriodTerm: "P7M", quantity: 7, billingTermEndDate: "2026-09-30" })]),
+  deal("due-1", "2026-10-01", [item()]),
+  deal("due-2", "2026-10-01", [item()]),
+  deal("quarterly-today", "2026-10-01", [quarterlyItem]),
+  deal("future", "2026-10-09", [quarterlyItem]),
+  deal("stale", "2026-08-10", [item()]),
+  deal("no-date", null, [item()]),
+  deal("annual", "2026-10-01", [item({ billingPeriodTerm: "P1Y" })]),
+  deal("seven-month", "2026-10-01", [item({ billingPeriodTerm: "P7M" })]),
 ];
 
 // 11:00 IST on the given October 2026 day.
@@ -54,7 +54,7 @@ beforeEach(() => {
   vi.mocked(fetchVaDealsWithLineItems).mockResolvedValue(deals);
   vi.mocked(findOpenLegacyJob).mockResolvedValue(null);
   vi.mocked(runRenewalPipeline).mockResolvedValue({
-    billingPeriod: "2026-10",
+    billingPeriod: "2026-10-01",
     zohoEstimateId: "zest-1",
     zohoEstimateNumber: "QT-1",
     paymentLinkId: "plink-1",
@@ -66,68 +66,58 @@ beforeEach(() => {
   });
 });
 
-const generated = () => vi.mocked(runRenewalPipeline).mock.calls.map((c) => [c[1], c[2]?.key ?? null, c[2]?.amount ?? null]);
+const generated = () => vi.mocked(runRenewalPipeline).mock.calls.map((c) => [c[1], c[2]?.key ?? null, c[2]?.months ?? null, c[2]?.amount ?? null]);
 
 describe("classifyVaDeals", () => {
   it("classifies every active deal against the IST date of the tick", async () => {
     const classified = await classifyVaDeals(istTick(1));
 
-    expect(classified.cycle.key).toBe("2026-10");
     expect(classified.today).toBe("2026-10-01");
-    expect(classified.day).toBe(1);
     expect(classified.deals.map((d) => [d.dealId, d.classification.kind, "due" in d.classification ? d.classification.due : null])).toEqual([
-      ["due-1", "monthly", true],
-      ["due-2", "monthly", true],
+      ["due-1", "cycle", true],
+      ["due-2", "cycle", true],
+      ["quarterly-today", "cycle", true],
+      ["future", "cycle", false],
+      ["stale", "cycle", true],
+      ["no-date", "cycle", false],
       ["annual", "none", null],
-      ["prepaid", "monthly", false],
-      ["quarterly-today", "term", true],
-      ["quarterly-stale", "term", true],
-      ["quarterly-future", "term", false],
       ["seven-month", "unsupported", null],
     ]);
   });
 
-  it("isBilledByCycles keeps monthly, term and unsupported deals away from the legacy due-date cron", async () => {
+  it("isBilledByCycles keeps cycle and unsupported deals away from the legacy due-date cron", async () => {
     const classified = await classifyVaDeals(istTick(1));
 
-    expect(classified.deals.filter((d) => isBilledByCycles(d.classification)).map((d) => d.dealId)).toEqual([
-      "due-1",
-      "due-2",
-      "prepaid",
-      "quarterly-today",
-      "quarterly-stale",
-      "quarterly-future",
-      "seven-month",
-    ]);
+    expect(classified.deals.filter((d) => !isBilledByCycles(d.classification)).map((d) => d.dealId)).toEqual(["annual"]);
   });
 });
 
 describe("runBillingCycleCheck", () => {
-  it("on the 1st generates every due monthly cycle and the quarterly term ending today, nothing else (TEST 7, TEST 8)", async () => {
+  it("quotes every client whose Next Renewal Date is today, monthly at the base price and quarterly at the last-paid amount", async () => {
     await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
 
     expect(generated()).toEqual([
-      ["due-1", "2026-10", null],
-      ["due-2", "2026-10", null],
-      ["quarterly-today", "2026-10-01", 39000],
+      ["due-1", "2026-10-01", 1, null],
+      ["due-2", "2026-10-01", 1, null],
+      ["quarterly-today", "2026-10-01", 3, 39000],
     ]);
   });
 
-  it("monthly cycles stop after the 4th, but a term ending on the 9th is quoted on the 9th", async () => {
+  it("quotes a client on their own date, whatever day of the month it is", async () => {
     await runBillingCycleCheck(await classifyVaDeals(istTick(9)), { pauseMs: 0 });
 
-    expect(generated()).toEqual([["quarterly-future", "2026-10-09", 39000]]);
+    expect(generated()).toEqual([["future", "2026-10-09", 3, 39000]]);
   });
 
-  it("retries a term through the three days after it ends and then leaves it to Quote now", async () => {
+  it("retries for three days after the date and then leaves it to the team to fix in HubSpot", async () => {
     vi.mocked(fetchVaDealsWithLineItems).mockResolvedValue([
-      deal("three-days", [quarterlyEnding("2026-09-28")]),
-      deal("four-days", [quarterlyEnding("2026-09-27")]),
+      deal("three-days", "2026-09-28", [item()]),
+      deal("four-days", "2026-09-27", [item()]),
     ]);
 
     await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
 
-    expect(generated()).toEqual([["three-days", "2026-09-28", 39000]]);
+    expect(generated().map((g) => g[0])).toEqual(["three-days"]);
   });
 
   it("skips a deal that still has an unpaid legacy quote so it is never billed twice", async () => {

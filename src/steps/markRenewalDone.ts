@@ -4,6 +4,7 @@ import {
   createRenewalLineItem,
   fetchDealWithLineItemsAndContact,
   markDealRenewalDone,
+  updateDealNextRenewalDate,
   type HubspotDeal,
 } from "../clients/hubspot.js";
 import {
@@ -12,7 +13,7 @@ import {
   saveHubspotLineItemId,
   type RenewalJob,
 } from "../repositories/renewalJobs.js";
-import { istToday } from "../utils/billingCycle.js";
+import { istToday, nextRenewalDateAfter } from "../utils/billingCycle.js";
 
 export async function markRenewalDone(
   supabase: SupabaseClient,
@@ -41,6 +42,10 @@ export async function markRenewalDone(
       const lineItemId = await ensureRenewalLineItem(dealId, deal, job);
       await saveHubspotLineItemId(supabase, job.id, lineItemId);
     }
+    // The deal's Next Renewal Date is what the daily classification reads:
+    // move it past the paid period so the next cycle is found without
+    // anyone editing the deal by hand.
+    await updateDealNextRenewalDate(dealId, nextRenewalDateAfter(job.service_period_start, job.term_months ?? 1));
   } else {
     // Legacy cycle: the bare copy of the deal's line item, as before, but
     // priced at what was actually billed.

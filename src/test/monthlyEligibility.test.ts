@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyDeal, termMonths } from "../utils/monthlyEligibility.js";
+import { classifyDeal, cycleLabel, termMonths } from "../utils/monthlyEligibility.js";
 import type { HubspotLineItem } from "../clients/hubspot.js";
 
 const item = (overrides: Partial<HubspotLineItem> = {}): HubspotLineItem => ({
@@ -27,13 +27,15 @@ const quarterly = (overrides: Partial<HubspotLineItem> = {}): HubspotLineItem =>
     ...overrides,
   });
 
-// The deal-level Billing Cycle field is deliberately NOT part of the rule;
-// it is wrong on five live deals. Only the latest line item's Term counts.
-const deal = (billingCycle: string | null, lineItems: HubspotLineItem[]) => ({
+// The cycle length comes from the latest line item's Term; the date a
+// client is quoted comes from the deal's Next Renewal Date. The deal-level
+// Billing Cycle field and the line item's own dates play no part.
+const deal = (nextRenewalDate: string | null, lineItems: HubspotLineItem[]) => ({
   dealId: "deal-1",
   dealName: "Acme <> VA",
   dealStage: "3102360263",
-  billingCycle,
+  billingCycle: "Quarterly",
+  nextRenewalDate,
   lineItems,
 });
 
@@ -44,108 +46,92 @@ describe("termMonths", () => {
   });
 });
 
-describe("classifyDeal — monthly (latest term P1M)", () => {
-  it("is monthly and due when the latest item ends on or before the 1st of this month", () => {
-    const result = classifyDeal(deal("Monthly", [item()]), "2026-10-01");
-    expect(result).toMatchObject({ kind: "monthly", due: true, latest: { id: "li-1" } });
-  });
-
-  it("picks the latest line item by billing end date, ignoring undated ones", () => {
-    const old = quarterly({ id: "old", billingTermEndDate: "2026-07-01" });
-    const bare = item({ id: "bare", recurringBillingFrequency: null, billingPeriodTerm: null, billingTermEndDate: null });
-    const result = classifyDeal(deal("Monthly", [old, bare, item()]), "2026-10-01");
-    expect(result).toMatchObject({ kind: "monthly", due: true, latest: { id: "li-1" } });
-  });
-
-  it("is monthly but not due when the latest item already covers past the month start", () => {
-    const result = classifyDeal(deal("Monthly", [item({ billingTermEndDate: "2026-11-01" })]), "2026-10-15");
-    expect(result).toMatchObject({ kind: "monthly", due: false, reason: expect.stringMatching(/2026-11-01/) });
-  });
-
-  it("decides from the line item term alone, whatever the deal's Billing Cycle field or frequency label says", () => {
-    expect(classifyDeal(deal("Quarterly", [item()]), "2026-10-01")).toMatchObject({ kind: "monthly", due: true });
-    expect(classifyDeal(deal(null, [item()]), "2026-10-01")).toMatchObject({ kind: "monthly", due: true });
-    expect(classifyDeal(deal("Monthly", [item({ recurringBillingFrequency: null })]), "2026-10-01")).toMatchObject({
-      kind: "monthly",
-      due: true,
-    });
+describe("cycleLabel", () => {
+  it("names the cycle by its length", () => {
+    expect(([1, 3, 6] as const).map(cycleLabel)).toEqual(["Monthly", "Quarterly", "Half-yearly"]);
   });
 });
 
-describe("classifyDeal — term cycles (latest term P3M or P6M)", () => {
-  it("is a quarterly term, due from the day the last term ended, billed at the last-paid amount", () => {
-    const result = classifyDeal(deal("Quarterly", [quarterly()]), "2026-10-09");
-    expect(result).toEqual({
-      kind: "term",
-      months: 3,
-      due: true,
-      periodStart: "2026-10-09",
-      lastPaid: 39000,
-      latest: quarterly(),
-    });
+describe("classifyDeal — cycle from the line item term, date from the deal's Next Renewal Date", () => {
+  it("a monthly client is due on their Next Renewal Date, priced from client_pricing (amount null)", () => {
+    const result = classifyDeal(deal("2026-10-01", [item()]), "2026-10-01");
+    expect(result).toEqual({ kind: "cycle", months: 1, due: true, periodStart: "2026-10-01", amount: null, latest: item() });
   });
 
-  it("stays due after the end date — the generator, not the classifier, applies the catch-up window", () => {
-    expect(classifyDeal(deal("Quarterly", [quarterly()]), "2026-11-20")).toMatchObject({ kind: "term", due: true });
+  it("stays due after the date has passed — the generator applies the catch-up window", () => {
+    expect(classifyDeal(deal("2026-10-01", [item()]), "2026-10-20")).toMatchObject({ kind: "cycle", due: true, periodStart: "2026-10-01" });
   });
 
-  it("is not due before the term ends", () => {
-    const result = classifyDeal(deal("Quarterly", [quarterly()]), "2026-10-01");
-    expect(result).toMatchObject({ kind: "term", months: 3, due: false, reason: expect.stringMatching(/2026-10-09/) });
+  it("is not due before the date, and says when the quote will go", () => {
+    const result = classifyDeal(deal("2026-10-01", [item()]), "2026-09-22");
+    expect(result).toMatchObject({ kind: "cycle", months: 1, due: false, periodStart: "2026-10-01", reason: expect.stringMatching(/2026-10-01/) });
   });
 
-  it("uses price × quantity as the last-paid amount and ignores the frequency label (the live monthly/P6M rows)", () => {
-    const sixMonths = item({
-      id: "li-6",
-      recurringBillingFrequency: "monthly",
-      billingPeriodTerm: "P6M",
-      quantity: 6,
-      price: 3500,
-      billingTermEndDate: "2027-01-31",
-    });
-    const result = classifyDeal(deal("Monthly", [sixMonths]), "2027-01-31");
-    expect(result).toMatchObject({ kind: "term", months: 6, due: true, periodStart: "2027-01-31", lastPaid: 21000 });
+  it("a quarterly client is due on their Next Renewal Date at what they paid last time", () => {
+    const result = classifyDeal(deal("2026-10-09", [quarterly()]), "2026-10-09");
+    expect(result).toEqual({ kind: "cycle", months: 3, due: true, periodStart: "2026-10-09", amount: 39000, latest: quarterly() });
+  });
+
+  it("uses price × quantity as the amount for a term (the live monthly/P6M rows)", () => {
+    const sixMonths = item({ id: "li-6", billingPeriodTerm: "P6M", quantity: 6, price: 3500 });
+    expect(classifyDeal(deal("2026-10-01", [sixMonths]), "2026-10-01")).toMatchObject({ kind: "cycle", months: 6, amount: 21000 });
+  });
+
+  it("ignores the line item's own start and end dates entirely", () => {
+    // Line item says paid through November, but the deal says the next renewal is 1 October: due.
+    expect(classifyDeal(deal("2026-10-01", [item({ billingTermEndDate: "2026-11-01" })]), "2026-10-01")).toMatchObject({ due: true });
+    // Line item ended in August, but the deal says 1 November: not due yet.
+    expect(classifyDeal(deal("2026-11-01", [item({ billingTermEndDate: "2026-08-01" })]), "2026-10-01")).toMatchObject({ due: false });
+  });
+
+  it("is never due without a real Next Renewal Date (blank, or HubSpot's 1970-01-01 placeholder)", () => {
+    for (const value of [null, "1970-01-01"]) {
+      const result = classifyDeal(deal(value, [item()]), "2026-10-01");
+      expect(result).toMatchObject({ kind: "cycle", months: 1, due: false, periodStart: null, reason: expect.stringMatching(/Next Renewal Date/) });
+    }
+  });
+
+  it("takes the term and price from the latest line item by end date, ignoring undated ones", () => {
+    const old = quarterly({ id: "old", billingTermEndDate: "2026-07-01" });
+    const bare = item({ id: "bare", billingPeriodTerm: null, billingTermEndDate: null });
+    const result = classifyDeal(deal("2026-10-01", [old, bare, item()]), "2026-10-01");
+    expect(result).toMatchObject({ kind: "cycle", months: 1, latest: { id: "li-1" } });
   });
 });
 
 describe("classifyDeal — not billed by cycles", () => {
   it("leaves yearly terms (P1Y / P12M) to the legacy due-date flow", () => {
     for (const term of ["P1Y", "P12M"]) {
-      const result = classifyDeal(deal("Annual", [item({ billingPeriodTerm: term, billingTermEndDate: "2027-04-29" })]), "2026-10-01");
-      expect(result).toMatchObject({ kind: "none", reason: expect.stringMatching(/yearly/i) });
+      expect(classifyDeal(deal("2026-10-01", [item({ billingPeriodTerm: term })]), "2026-10-01")).toMatchObject({
+        kind: "none",
+        reason: expect.stringMatching(/yearly/i),
+      });
     }
   });
 
   it("flags an odd term such as P7M as unsupported so nothing bills it automatically", () => {
-    const result = classifyDeal(deal("Monthly", [item({ billingPeriodTerm: "P7M", quantity: 7 })]), "2026-10-01");
-    expect(result).toMatchObject({ kind: "unsupported", reason: expect.stringMatching(/P7M/) });
+    expect(classifyDeal(deal("2026-10-01", [item({ billingPeriodTerm: "P7M" })]), "2026-10-01")).toMatchObject({
+      kind: "unsupported",
+      reason: expect.stringMatching(/P7M/),
+    });
   });
 
   it("is not billed when the latest item has no usable term", () => {
-    expect(classifyDeal(deal("Monthly", [item({ billingPeriodTerm: null })]), "2026-10-01")).toMatchObject({
-      kind: "none",
-      reason: expect.stringMatching(/term/i),
-    });
-    expect(classifyDeal(deal("Monthly", [item({ billingPeriodTerm: "P1W" })]), "2026-10-01")).toMatchObject({
-      kind: "none",
-      reason: expect.stringMatching(/P1W/),
-    });
+    expect(classifyDeal(deal("2026-10-01", [item({ billingPeriodTerm: null })]), "2026-10-01")).toMatchObject({ kind: "none", reason: expect.stringMatching(/term/i) });
+    expect(classifyDeal(deal("2026-10-01", [item({ billingPeriodTerm: "P1W" })]), "2026-10-01")).toMatchObject({ kind: "none", reason: expect.stringMatching(/P1W/) });
   });
 
   it("is not billed when no line item carries a billing end date", () => {
-    const result = classifyDeal(deal("Monthly", [item({ billingTermEndDate: null })]), "2026-10-01");
-    expect(result).toMatchObject({ kind: "none", reason: expect.stringMatching(/no line item/i) });
+    expect(classifyDeal(deal("2026-10-01", [item({ billingTermEndDate: null })]), "2026-10-01")).toMatchObject({ kind: "none", reason: expect.stringMatching(/no line item/i) });
   });
 
   it("fails closed when two latest items tie with different terms", () => {
     const a = item({ id: "a" });
     const b = quarterly({ id: "b", billingTermEndDate: "2026-10-01" });
-    const result = classifyDeal(deal("Monthly", [a, b]), "2026-10-01");
-    expect(result).toMatchObject({ kind: "none", reason: expect.stringMatching(/disagree/) });
+    expect(classifyDeal(deal("2026-10-01", [a, b]), "2026-10-01")).toMatchObject({ kind: "none", reason: expect.stringMatching(/disagree/) });
   });
 
   it("fails closed when the line items could not be read", () => {
-    const result = classifyDeal({ ...deal("Monthly", []), lineItemsError: "HubSpot API error 500" }, "2026-10-01");
-    expect(result).toMatchObject({ kind: "none", reason: expect.stringMatching(/500/) });
+    expect(classifyDeal({ ...deal("2026-10-01", []), lineItemsError: "HubSpot API error 500" }, "2026-10-01")).toMatchObject({ kind: "none", reason: expect.stringMatching(/500/) });
   });
 });

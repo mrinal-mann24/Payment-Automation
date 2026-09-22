@@ -2,15 +2,14 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { getSupabaseClient } from "../clients/supabase.js";
 import { asEmail, fetchVaDealEmails, fetchVaDealsWithLineItems, updateDealAccountantEmail, type DealEmails } from "../clients/hubspot.js";
-import { generateRenewalQuote, QuoteNotDueError } from "../jobs/generateRenewalQuote.js";
 import { listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
 import { upsertClientPricing } from "../repositories/clientPricing.js";
 import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
 import { createAdditionCharge } from "../steps/createAdditionCharge.js";
 import { SettlementInProgressError, settleRenewalPayment } from "../steps/settleRenewalPayment.js";
-import { currentBillingCycle, istToday, servicePeriodFrom } from "../utils/billingCycle.js";
+import { billingMonthKey, daysBetween, istToday, servicePeriodFrom } from "../utils/billingCycle.js";
 import { deriveCycleStatus } from "../utils/cycleStatus.js";
-import { classifyDeal, type DealClassification } from "../utils/monthlyEligibility.js";
+import { classifyDeal, cycleLabel, type DealClassification } from "../utils/monthlyEligibility.js";
 import { pricingAdminHtml } from "./pricingAdminPage.js";
 
 export const pricingAdminRouter = Router();
@@ -42,33 +41,32 @@ function cycleView(job: RenewalJob) {
   };
 }
 
-const BILLING_LABELS: Record<DealClassification["kind"], string> = {
-  monthly: "Monthly",
-  term: "Term",
-  unsupported: "Unsupported",
-  none: "Not billed",
-};
-
-// How the deal is billed and whether the cycle it is due for has a row yet
-// — "Quote now" shows when it is due and nothing has been generated.
-function billingView(classification: DealClassification, monthKey: string, jobs: RenewalJob[]) {
-  const cycleKey =
-    classification.kind === "monthly" ? monthKey : classification.kind === "term" ? classification.periodStart : null;
-  const label =
-    classification.kind === "term"
-      ? classification.months === 3
-        ? "Quarterly"
-        : "Half-yearly"
-      : BILLING_LABELS[classification.kind];
+// How the deal is billed, when its next quote goes (the deal's Next Renewal
+// Date) and whether that cycle already has a row.
+function billingView(classification: DealClassification, today: string, jobs: RenewalJob[]) {
+  if (classification.kind !== "cycle") {
+    return {
+      kind: classification.kind,
+      label: classification.kind === "unsupported" ? "Unsupported" : "Not billed",
+      months: null,
+      due: null,
+      reason: classification.reason,
+      periodStart: null,
+      amount: null,
+      quoted: false,
+      daysOverdue: null,
+    };
+  }
   return {
-    kind: classification.kind,
-    label,
-    due: "due" in classification ? classification.due : null,
-    reason: "reason" in classification ? classification.reason : null,
-    periodStart: classification.kind === "term" ? classification.periodStart : null,
-    lastPaid: classification.kind === "term" ? classification.lastPaid : null,
-    cycleKey,
-    quoted: cycleKey !== null && jobs.some((job) => job.billing_period === cycleKey),
+    kind: "cycle",
+    label: cycleLabel(classification.months),
+    months: classification.months,
+    due: classification.due,
+    reason: classification.due ? null : classification.reason,
+    periodStart: classification.periodStart,
+    amount: classification.amount,
+    quoted: classification.periodStart !== null && jobs.some((job) => job.billing_period === classification.periodStart),
+    daysOverdue: classification.due ? daysBetween(classification.periodStart, today) : null,
   };
 }
 
@@ -119,12 +117,12 @@ function emailView(emails: DealEmails | undefined) {
 pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Response) => {
   try {
     const supabase = getSupabaseClient();
-    const cycle = currentBillingCycle();
+    const monthKey = billingMonthKey();
     const today = istToday();
     const [deals, pricing, jobs, additions] = await Promise.all([
       fetchVaDealsWithLineItems(),
       supabase.from("client_pricing").select("*"),
-      findAdminCycleJobs(supabase, cycle.key),
+      findAdminCycleJobs(supabase, monthKey),
       listRecentAdditionCharges(supabase),
     ]);
     if (pricing.error) throw new Error(pricing.error.message);
@@ -143,7 +141,7 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
         dealName: deal.dealName,
         dealStage: deal.dealStage,
         basePrice: pricingByDealId.get(deal.dealId)?.base_price ?? null,
-        billing: billingView(classifyDeal(deal, today), cycle.key, dealJobs),
+        billing: billingView(classifyDeal(deal, today), today, dealJobs),
         email: emailView(emails.get(deal.dealId)),
         cycles: dealJobs.map(cycleView),
       };
@@ -151,7 +149,7 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
 
     const dealNames = new Map(deals.map((deal) => [deal.dealId, deal.dealName]));
     res.status(200).json({
-      cycle: { key: cycle.key, narration: cycle.period.narration, today },
+      cycle: { today, monthKey },
       deals: result,
       additions: additions.map((charge) => additionView(charge, dealNames)),
     });
@@ -210,39 +208,6 @@ pricingAdminRouter.post("/admin/pricing/accountant-email", async (req: Request, 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: "Failed to update the accountant email in HubSpot", details: message });
-  }
-});
-
-// "Quote now": the renewal quote the daily tick would generate for this
-// deal, without the tick's catch-up window (a term that ended weeks ago is
-// quoted from the day it ended). 409 when the deal is not due.
-const generateQuoteSchema = z.object({
-  dealId: z.string().min(1),
-});
-
-pricingAdminRouter.post("/admin/pricing/generate-quote", async (req: Request, res: Response) => {
-  const parsed = generateQuoteSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
-    return;
-  }
-
-  try {
-    const supabase = getSupabaseClient();
-    const { kind, result } = await generateRenewalQuote(supabase, parsed.data.dealId);
-    console.log(
-      `[pricingAdmin] deal ${parsed.data.dealId} (${kind}) -> quote ${result.zohoEstimateNumber} for ${result.billingPeriod}, ` +
-        `WhatsApp ${result.periskopeSent ? "sent" : `skipped: ${result.periskopeSkipReason}`}, ` +
-        `email ${result.emailSent ? "sent" : `not sent: ${result.emailError}`}`,
-    );
-    res.status(200).json({ kind, ...result });
-  } catch (err) {
-    if (err instanceof QuoteNotDueError) {
-      res.status(409).json({ error: err.message });
-      return;
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(502).json({ error: "Failed to generate the quote", details: message });
   }
 });
 

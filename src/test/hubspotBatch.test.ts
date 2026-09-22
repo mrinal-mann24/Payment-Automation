@@ -37,7 +37,7 @@ describe("fetchVaDealsWithLineItems", () => {
       if (path.endsWith("/crm/v3/objects/deals/search")) {
         return jsonResponse({
           results: [
-            { id: "d1", properties: { dealname: "One <> VA", dealstage: "3102360263", billing_cycle: "Monthly" } },
+            { id: "d1", properties: { dealname: "One <> VA", dealstage: "3102360263", billing_cycle: "Monthly", next_renewal_date: "2026-10-01" } },
             { id: "d2", properties: { dealname: "Two <> VA", dealstage: "2462646003", billing_cycle: null } },
           ],
         });
@@ -61,9 +61,9 @@ describe("fetchVaDealsWithLineItems", () => {
     const deals = await fetchVaDealsWithLineItems();
 
     expect(batchReadCalls.map((c) => c.inputs.length)).toEqual([100, 20]);
-    expect(deals.map((d) => [d.dealId, d.billingCycle, d.lineItems.length])).toEqual([
-      ["d1", "Monthly", 120],
-      ["d2", null, 0],
+    expect(deals.map((d) => [d.dealId, d.billingCycle, d.nextRenewalDate, d.lineItems.length])).toEqual([
+      ["d1", "Monthly", "2026-10-01", 120],
+      ["d2", null, null, 0],
     ]);
     expect(deals[0]!.lineItems[0]).toMatchObject({
       id: "900000",

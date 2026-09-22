@@ -25,7 +25,7 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
 | 11 — WhatsApp group + Zoho email delivery | `context/features/step6.md` | Done — live verification pending | Group id from `clients.whatsapp_group_id` (24/27 billed deals have one; contact phone fallback). Email via Zoho Books' email API — **not yet exercised live** (token scope, PDF attachment, DRAFT→SENT side effect to confirm). |
 | 12 — One settlement path (Razorpay / Yes Bank / manual) + HubSpot Renewal line item | `context/features/step6.md` | Done — unit-tested; live verification pending | `settleRenewalPayment` with atomic `claimPayment`, Razorpay link cancelled on manual payment, independent idempotent steps, daily sweep; `markRenewalDone` creates one complete HubSpot line item and stores its id. |
 | 13 — Admin billing-cycle view + "Paid through Yes Bank" / "Record manual payment" | n/a | Done — rendered live 2026-09-22 | `/admin/pricing` shows the billing kind (+ reason) per deal, a Billing-cycles table and `POST /admin/pricing/record-payment`. "Add One-Time Payment" renamed 2026-09-22 (it records a payment; it never created one). Still no auth (business decision). |
-| 14 — Term billing cycles (quarterly / half-yearly), Quote now, one-time quotes to group + email | `context/features/step6.md` | Done — unit-tested; live verification pending | Cycle decided from the latest line item's Term; term cycles quoted the day the last term ends at the last-paid amount, reminded 4/6/8 days later, HubSpot line item with the same term. `POST /admin/pricing/generate-quote` ("Quote now") for anything past the 4-day window. One-time quotes take service + narration and go to the group and by email. Migration `0011` applied live. 168/168. |
+| 14 — Term billing cycles (quarterly / half-yearly) on the Next Renewal Date, one-time quotes to group + email | `context/features/step6.md` | Done — unit-tested; live verification pending | Cycle decided from the latest line item's Term; term cycles quoted the day the last term ends at the last-paid amount, reminded 4/6/8 days later, HubSpot line item with the same term. `POST /admin/pricing/generate-quote` ("Quote now") for anything past the 4-day window. One-time quotes take service + narration and go to the group and by email. Migration `0011` applied live. 168/168. |
 
 ## Blocked / open questions
 - No auth on `/admin/pricing` or its two POST endpoints — anyone who
@@ -61,10 +61,12 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   now** on a stale term, and a quarterly-term HubSpot line item
   (`quarterly/P3M`). All sends reach real channels, so these need an
   explicit go-ahead.
-- **Go-live data checks (2026-09-22):** Piyush (term ended 19 Sep) and
-  Ankit Yadav (10 Aug) are past the 4-day window and are never auto-quoted
-  — the team decides with Quote now. Laundry Labs is the first automated
-  term quote (9 Oct, INR 39,000 = last paid). Down The Rabbit Hole's
+- **Go-live data checks (2026-09-22, Next Renewal Date rule):** 13 deals
+  point at a future Next Renewal Date (10 of them 1 October, quoted that
+  morning), 12 at a date that has already passed and 3 at the 1970-01-01
+  placeholder — those 15 are quoted only once the team sets the date in
+  HubSpot (the page lists them under "Renewal date needs fixing"). Down The
+  Rabbit Hole's
   `P7M` line item (ends 30 Sep) is unsupported: nothing bills it until
   the line item is corrected in HubSpot. Rapheal, MD Afreed and SLV Trades
   have no dated line item and are never billed. Yearly (Sahil, the test
@@ -125,6 +127,17 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (Next Renewal Date) — The quote date now comes from the
+  HubSpot deal's **Next Renewal Date** for every cycle (monthly and term);
+  the line item's own dates no longer decide anything, only its Term
+  (cycle length) and price. A client is quoted on that date (3-day
+  catch-up), the row is keyed by it, and on payment the automation moves
+  the date forward by one cycle (`updateDealNextRenewalDate`). The
+  **Quote now** button and `POST /admin/pricing/generate-quote` are
+  removed — quotes are automatic at 11:00 IST; `POST /webhooks/renewal`
+  remains the only on-demand path. Admin page: next-quote date per client,
+  "Quoting today" and "Renewal date needs fixing" tiles. RED confirmed
+  (23 tests), GREEN: typecheck clean, 181/181.
 - 2026-09-22 (accountant email) — The email source is the new HubSpot deal
   field **Accountant Email** (`accountant_email`, empty on every deal
   today), not Billing POC Email, which the team must not edit. Quotes and

@@ -161,7 +161,7 @@ export const pricingAdminHtml = `<!doctype html>
     <div class="card-head">
       <h2>Clients</h2>
       <span class="count" id="deals-count"></span>
-      <p>How each client is billed, decided from the latest HubSpot line item's term. <strong>Quote now</strong> appears when a cycle is due and nothing has been sent. Quotes and invoices are emailed <strong>only</strong> to the <strong>Accountant email</strong> (HubSpot's Accountant Email field; saving writes it back to HubSpot). With no accountant email, nothing is emailed and the client gets WhatsApp only.</p>
+      <p>How each client is billed: the cycle length from the latest HubSpot line item's term, the quote date from the deal's <strong>Next Renewal Date</strong>. Quotes go out automatically at 11:00 IST on that date, and the date moves forward by one cycle when the client pays. Quotes and invoices are emailed <strong>only</strong> to the <strong>Accountant email</strong> (HubSpot's Accountant Email field; saving writes it back to HubSpot). With no accountant email, nothing is emailed and the client gets WhatsApp only.</p>
     </div>
     <div class="table-wrap">
       <table>
@@ -328,22 +328,27 @@ function settlementSummary(result) {
 
 function renderStats(data) {
   const deals = data.deals;
-  const kinds = { monthly: 0, term: 0, unsupported: 0, none: 0 };
-  let dueNow = 0;
+  let monthly = 0, term = 0, attention = 0, quotingToday = 0, datePassed = 0, noEmail = 0;
   for (const d of deals) {
-    kinds[d.billing.kind] = (kinds[d.billing.kind] || 0) + 1;
-    if (d.billing.due && !d.billing.quoted) dueNow++;
+    const b = d.billing;
+    if (b.kind === 'cycle') {
+      if (b.months === 1) monthly++; else term++;
+      if (b.due && !b.quoted) { if (b.daysOverdue < 4) quotingToday++; else datePassed++; }
+      if (!b.periodStart) datePassed++;
+    } else {
+      attention++;
+    }
+    if (!d.email.accountantValid) noEmail++;
   }
-  const noEmail = deals.filter((d) => !d.email.accountantValid).length;
   const cycles = deals.flatMap((d) => d.cycles);
   const unpaid = cycles.filter((c) => c.status !== 'paid').length;
-  const attention = kinds.unsupported + kinds.none;
 
   const stats = [
     ['Active clients', deals.length, '', 'in the VA pipeline'],
-    ['Monthly', kinds.monthly, '', 'quoted on the 1st'],
-    ['Quarterly / half-yearly', kinds.term, '', 'quoted when the term ends'],
-    ['Due, not quoted', dueNow, dueNow ? 'warn' : 'good', dueNow ? 'press Quote now to send' : 'nothing waiting'],
+    ['Monthly', monthly, '', 'quoted on their Next Renewal Date'],
+    ['Quarterly / half-yearly', term, '', 'quoted on their Next Renewal Date'],
+    ['Quoting today', quotingToday, quotingToday ? 'good' : '', 'the 11:00 IST run sends these'],
+    ['Renewal date needs fixing', datePassed, datePassed ? 'warn' : 'good', 'missing or passed without a quote'],
     ['Needs HubSpot fix', attention, attention ? 'bad' : 'good', 'unsupported term or no line item'],
     ['No accountant email', noEmail, noEmail ? 'warn' : 'good', 'these clients get WhatsApp only'],
     ['Unpaid cycles', unpaid, unpaid ? 'warn' : 'good', 'awaiting payment'],
@@ -363,31 +368,23 @@ function renderStats(data) {
 function billingCell(deal) {
   const td = document.createElement('td');
   const b = deal.billing;
-  const badgeClass = b.kind === 'monthly' ? 'monthly' : b.kind === 'term' ? 'term' : b.kind === 'unsupported' ? 'unsupported' : 'other';
+  const badgeClass = b.kind === 'cycle' ? (b.months === 1 ? 'monthly' : 'term') : b.kind === 'unsupported' ? 'unsupported' : 'other';
   td.appendChild(el('span', 'badge ' + badgeClass, b.label));
-  if (b.kind === 'term') {
-    td.appendChild(el('div', 'sub', (b.due ? 'Due from ' : 'Next quote from ') + fmtDate(b.periodStart) + ' · last paid ' + money(b.lastPaid)));
+  if (b.kind !== 'cycle') {
+    td.appendChild(el('div', 'sub', b.reason));
+    return td;
   }
-  if (b.reason) td.appendChild(el('div', 'sub', b.reason));
-  if (b.due && !b.quoted) {
-    const actions = el('div', 'row-actions quote-now');
-    const quoteBtn = el('button', 'btn primary small', 'Quote now');
-    quoteBtn.type = 'button';
-    quoteBtn.onclick = async () => {
-      if (!confirm('Send the renewal quote for ' + deal.dealName + ' now (cycle ' + b.cycleKey + ')? It goes to the client\\'s WhatsApp group and email.')) return;
-      const done = busy(quoteBtn, 'Sending…');
-      try {
-        const result = await postJson('/admin/pricing/generate-quote', { dealId: deal.dealId });
-        const outstanding = !result.periskopeSent || !result.emailSent;
-        toast(outstanding ? 'err' : 'ok', deal.dealName + ': quote ' + result.zohoEstimateNumber + ' · ' + deliverySummary(result), outstanding);
-        await loadDeals();
-      } catch (err) {
-        toast('err', deal.dealName + ': ' + err.message, true);
-        done();
-      }
-    };
-    actions.appendChild(quoteBtn);
-    td.appendChild(actions);
+  if (b.months !== 1) td.appendChild(el('div', 'sub', 'Last paid ' + money(b.amount) + ', quoted the same'));
+  if (!b.periodStart) {
+    td.appendChild(el('div', 'sub warn', b.reason + ' — set the Next Renewal Date in HubSpot'));
+  } else if (!b.due) {
+    td.appendChild(el('div', 'sub', 'Next quote on ' + fmtDate(b.periodStart) + ', automatic at 11:00 IST'));
+  } else if (b.quoted) {
+    td.appendChild(el('div', 'sub', 'Quoted for the period from ' + fmtDate(b.periodStart)));
+  } else if (b.daysOverdue < 4) {
+    td.appendChild(el('div', 'sub', 'Due: the 11:00 IST run quotes it today'));
+  } else {
+    td.appendChild(el('div', 'sub warn', 'Next Renewal Date ' + fmtDate(b.periodStart) + ' passed ' + b.daysOverdue + ' days ago without a quote — update it in HubSpot'));
   }
   return td;
 }
@@ -669,7 +666,7 @@ function renderCycles(data) {
   const tbody = document.getElementById('cycles-body');
   tbody.innerHTML = '';
   document.getElementById('cycles-subtitle').textContent =
-    'Current month ' + data.cycle.key + ' — ' + data.cycle.narration + '. Quarterly and half-yearly cycles are keyed by the day they start. Unpaid cycles stay listed until paid.';
+    'Month ' + data.cycle.monthKey + '. Each cycle is keyed by the day it starts, the Next Renewal Date in HubSpot. Unpaid cycles stay listed until paid.';
 
   let rows = 0;
   for (const deal of data.deals) {
@@ -741,7 +738,7 @@ function renderCycles(data) {
 
   if (rows === 0) {
     const tr = document.createElement('tr');
-    const td = el('td', 'empty', 'No billing cycles yet. Monthly quotes go out on the 1st; quarterly and half-yearly ones on the day the last term ends. A row appears here the moment a quote is sent, with Paid through Yes Bank and Record manual payment beside it.');
+    const td = el('td', 'empty', 'No billing cycles yet. A quote goes out automatically at 11:00 IST on each client Next Renewal Date; a row appears here the moment it is sent, with Paid through Yes Bank and Record manual payment beside it.');
     td.colSpan = 7;
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -807,7 +804,7 @@ async function loadDeals() {
   renderCycles(data);
   renderAdditions(data);
 
-  document.getElementById('brand-sub').textContent = 'VA pipeline · today ' + fmtDate(data.cycle.today) + ' IST · current month ' + data.cycle.key;
+  document.getElementById('brand-sub').textContent = 'VA pipeline · today ' + fmtDate(data.cycle.today) + ' IST · month ' + data.cycle.monthKey;
   document.getElementById('loaded-at').textContent = 'refreshed ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   document.getElementById('loading').style.display = 'none';
   for (const id of ['stats', 'deals-card', 'cycles-card', 'additions-card']) {

@@ -24,11 +24,12 @@ const item = (overrides: Partial<HubspotLineItem> = {}): HubspotLineItem => ({
   ...overrides,
 });
 
-const deal = (dealId: string, lineItems: HubspotLineItem[]): VaDealWithLineItems => ({
+const deal = (dealId: string, nextRenewalDate: string | null, lineItems: HubspotLineItem[]): VaDealWithLineItems => ({
   dealId,
   dealName: `${dealId} <> VA`,
   dealStage: "3102360263",
   billingCycle: "Monthly",
+  nextRenewalDate,
   lineItems,
 });
 
@@ -38,12 +39,12 @@ const oct1 = new Date("2026-10-01T05:30:00Z");
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchVaDealsWithLineItems).mockResolvedValue([
-    deal("monthly-due", [item()]),
-    deal("monthly-prepaid", [item({ billingTermEndDate: "2026-11-01" })]),
-    deal("quarterly-stale", [item({ billingPeriodTerm: "P3M", billingTermEndDate: "2026-08-10", price: 21000 })]),
-    deal("quarterly-future", [item({ billingPeriodTerm: "P3M", billingTermEndDate: "2026-10-09", price: 39000 })]),
-    deal("yearly", [item({ billingPeriodTerm: "P1Y", billingTermEndDate: "2027-04-29" })]),
-    deal("seven-month", [item({ billingPeriodTerm: "P7M", billingTermEndDate: "2026-09-30" })]),
+    deal("monthly-due", "2026-10-01", [item()]),
+    deal("future", "2026-10-09", [item()]),
+    deal("quarterly-stale", "2026-08-10", [item({ billingPeriodTerm: "P3M", price: 21000 })]),
+    deal("no-date", null, [item()]),
+    deal("yearly", "2026-10-01", [item({ billingPeriodTerm: "P1Y" })]),
+    deal("seven-month", "2026-10-01", [item({ billingPeriodTerm: "P7M" })]),
   ]);
   vi.mocked(runRenewalPipeline).mockResolvedValue({
     billingPeriod: "x",
@@ -58,24 +59,24 @@ beforeEach(() => {
   });
 });
 
-describe("generateRenewalQuote (manual 'Quote now' / renewal webhook)", () => {
-  it("quotes a due monthly deal for the current IST month", async () => {
+describe("generateRenewalQuote (POST /webhooks/renewal)", () => {
+  it("quotes a client whose Next Renewal Date has arrived, from that date", async () => {
     const outcome = await generateRenewalQuote(fakeSupabase, "monthly-due", oct1);
 
-    expect(outcome.kind).toBe("monthly");
-    expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-10", months: 1, amount: null });
+    expect(outcome.kind).toBe("cycle");
+    expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-10-01", months: 1, amount: null });
   });
 
-  it("quotes a term deal whose term has ended, however long ago — the manual route ignores the catch-up window", async () => {
+  it("quotes a client whose date passed weeks ago — the manual route ignores the catch-up window", async () => {
     const outcome = await generateRenewalQuote(fakeSupabase, "quarterly-stale", oct1);
 
-    expect(outcome.kind).toBe("term");
+    expect(outcome.kind).toBe("cycle");
     expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-08-10", months: 3, amount: 21000 });
   });
 
-  it("refuses a monthly deal already billed for the month and a term that has not ended yet", async () => {
-    await expect(generateRenewalQuote(fakeSupabase, "monthly-prepaid", oct1)).rejects.toThrow(QuoteNotDueError);
-    await expect(generateRenewalQuote(fakeSupabase, "quarterly-future", oct1)).rejects.toThrow(/2026-10-09/);
+  it("refuses a client whose date is still ahead, or who has no date", async () => {
+    await expect(generateRenewalQuote(fakeSupabase, "future", oct1)).rejects.toThrow(/2026-10-09/);
+    await expect(generateRenewalQuote(fakeSupabase, "no-date", oct1)).rejects.toThrow(QuoteNotDueError);
     expect(runRenewalPipeline).not.toHaveBeenCalled();
   });
 

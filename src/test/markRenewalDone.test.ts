@@ -6,6 +6,7 @@ vi.mock("../clients/hubspot.js", () => ({
   fetchDealWithLineItemsAndContact: vi.fn(),
   addLineItemToDeal: vi.fn(),
   createRenewalLineItem: vi.fn(),
+  updateDealNextRenewalDate: vi.fn(),
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
   findRenewalJob: vi.fn(),
@@ -18,6 +19,7 @@ import {
   fetchDealWithLineItemsAndContact,
   addLineItemToDeal,
   createRenewalLineItem,
+  updateDealNextRenewalDate,
 } from "../clients/hubspot.js";
 import { findRenewalJob, markHubspotRenewalDone, saveHubspotLineItemId } from "../repositories/renewalJobs.js";
 import { markRenewalDone } from "../steps/markRenewalDone.js";
@@ -184,6 +186,11 @@ describe("markRenewalDone for a monthly cycle", () => {
       months: 1,
     });
     expect(saveHubspotLineItemId).toHaveBeenCalledWith(fakeSupabase, "job-1", "li-new");
+    // HubSpot's Next Renewal Date moves to the day after the paid month, so the next cycle is found without manual entry.
+    expect(updateDealNextRenewalDate).toHaveBeenCalledWith("deal-1", "2026-11-01");
+    expect(vi.mocked(updateDealNextRenewalDate).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(markDealRenewalDone).mock.invocationCallOrder[0]!,
+    );
     expect(vi.mocked(saveHubspotLineItemId).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(markDealRenewalDone).mock.invocationCallOrder[0]!,
     );
@@ -225,6 +232,7 @@ describe("markRenewalDone for a monthly cycle", () => {
       price: 34000,
     });
     expect(createRenewalLineItem).not.toHaveBeenCalled();
+    expect(updateDealNextRenewalDate).not.toHaveBeenCalled();
   });
 });
 
@@ -263,6 +271,7 @@ describe("markRenewalDone for a quarterly term cycle", () => {
       months: 3,
     });
     expect(saveHubspotLineItemId).toHaveBeenCalledWith(fakeSupabase, "job-1", "li-q");
+    expect(updateDealNextRenewalDate).toHaveBeenCalledWith("deal-1", "2027-01-09");
     expect(addLineItemToDeal).not.toHaveBeenCalled();
   });
 });

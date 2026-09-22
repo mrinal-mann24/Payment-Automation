@@ -14,27 +14,16 @@ export function istToday(now: Date = new Date()): string {
   return new Date(now.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-// The IST calendar month (YYYY-MM) for an instant — the billing_period key
-// of a monthly renewal_jobs row.
+// The IST calendar month (YYYY-MM) for an instant — used by the admin page
+// to list every cycle that started this month.
 export function billingMonthKey(now: Date = new Date()): string {
   return istToday(now).slice(0, 7);
 }
 
-export function istDayOfMonth(now: Date = new Date()): number {
-  return Number(istToday(now).slice(8, 10));
-}
-
 export interface ServicePeriod {
-  start: string; // YYYY-MM-DD, first day of the month
-  end: string; // YYYY-MM-DD, last day of the month (inclusive)
+  start: string; // YYYY-MM-DD, first day of the period
+  end: string; // YYYY-MM-DD, last day of the period (inclusive)
   narration: string; // e.g. "Service period: 1 October 2026 to 31 October 2026"
-}
-
-export function servicePeriod(monthKey: string): ServicePeriod {
-  if (!/^\d{4}-\d{2}$/.test(monthKey)) {
-    throw new Error(`Billing month key must be YYYY-MM, got "${monthKey}"`);
-  }
-  return servicePeriodFrom(`${monthKey}-01`, 1);
 }
 
 function isoDate(date: Date): string {
@@ -46,34 +35,36 @@ function longDate(iso: string): string {
   return `${day} ${MONTH_NAMES[month! - 1]} ${year}`;
 }
 
-// A service period of `months` months starting on `start` (YYYY-MM-DD):
-// it ends the day before the same day-of-month `months` later, clamped to
-// the last day of a shorter month. Started on the 1st for one month it is
-// exactly the calendar month.
-export function servicePeriodFrom(start: string, months: number): ServicePeriod {
+// The day after a period of `months` months starting on `start`: the same
+// day-of-month `months` later, clamped to the last day of a shorter month.
+function periodEndExclusive(start: string, months: number): string {
   const [year, month, day] = start.split("-").map(Number);
   const lastDayOfTarget = new Date(Date.UTC(year!, month! - 1 + months + 1, 0)).getUTCDate();
-  const endExclusive = Date.UTC(year!, month! - 1 + months, Math.min(day!, lastDayOfTarget));
-  const end = isoDate(new Date(endExclusive - 86_400_000));
+  return isoDate(new Date(Date.UTC(year!, month! - 1 + months, Math.min(day!, lastDayOfTarget))));
+}
+
+// A service period of `months` months starting on `start` (YYYY-MM-DD).
+// Started on the 1st for one month it is exactly the calendar month.
+export function servicePeriodFrom(start: string, months: number): ServicePeriod {
+  const endExclusive = periodEndExclusive(start, months);
+  const end = isoDate(new Date(Date.parse(`${endExclusive}T00:00:00Z`) - 86_400_000));
   return { start, end, narration: `Service period: ${longDate(start)} to ${longDate(end)}` };
 }
 
+// What HubSpot's Next Renewal Date becomes once this period is paid: the
+// day after it ends.
+export function nextRenewalDateAfter(start: string, months: number): string {
+  return periodEndExclusive(start, months);
+}
+
 export interface BillingCycle {
-  key: string; // renewal_jobs.billing_period: YYYY-MM for a monthly cycle, the start date for a term cycle
+  key: string; // renewal_jobs.billing_period: the period's start date (the deal's Next Renewal Date)
   period: ServicePeriod;
-  months: number; // 1 = calendar month, 3 = quarterly, 6 = half-yearly
+  months: number; // 1 = monthly, 3 = quarterly, 6 = half-yearly
   amount: number | null; // pre-tax amount to bill; null = the deal's client_pricing base price (monthly)
 }
 
-export function currentBillingCycle(now: Date = new Date()): BillingCycle {
-  const key = billingMonthKey(now);
-  return { key, period: servicePeriod(key), months: 1, amount: null };
-}
-
-// A quarterly / half-yearly cycle starts the day the client's last term
-// ended (HubSpot's billing end date is exclusive) and bills what they paid
-// last time.
-export function termBillingCycle(periodStart: string, months: number, amount: number): BillingCycle {
+export function billingCycleFrom(periodStart: string, months: number, amount: number | null): BillingCycle {
   return { key: periodStart, period: servicePeriodFrom(periodStart, months), months, amount };
 }
 

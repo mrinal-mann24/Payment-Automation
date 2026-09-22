@@ -243,6 +243,7 @@ export interface VaPipelineDeal {
   dealName: string;
   dealStage: string;
   billingCycle: string | null;
+  nextRenewalDate: string | null; // HubSpot next_renewal_date (YYYY-MM-DD): the day the client is next quoted
 }
 
 // Used by the pricing admin interface to list deals to price/charge —
@@ -262,13 +263,13 @@ export async function fetchVaPipelineDeals(): Promise<VaPipelineDeal[]> {
           ],
         },
       ],
-      properties: ["dealname", "dealstage", "billing_cycle"],
+      properties: ["dealname", "dealstage", "billing_cycle", "next_renewal_date"],
       limit: 100,
     }),
   })) as {
     results: Array<{
       id: string;
-      properties: { dealname?: string; dealstage?: string; billing_cycle?: string | null };
+      properties: { dealname?: string; dealstage?: string; billing_cycle?: string | null; next_renewal_date?: string | null };
     }>;
   };
 
@@ -277,6 +278,7 @@ export async function fetchVaPipelineDeals(): Promise<VaPipelineDeal[]> {
     dealName: deal.properties.dealname ?? "",
     dealStage: deal.properties.dealstage ?? "",
     billingCycle: deal.properties.billing_cycle ?? null,
+    nextRenewalDate: toIsoDate(deal.properties.next_renewal_date),
   }));
 }
 
@@ -452,4 +454,13 @@ export async function fetchVaDealEmails(dealIds: string[]): Promise<Map<string, 
   }
 
   return emails;
+}
+
+// On payment: HubSpot's Next Renewal Date is what decides when a client is
+// next quoted, so the automation moves it to the day after the paid period.
+export async function updateDealNextRenewalDate(dealId: string, isoDate: string): Promise<void> {
+  await hubspotFetch(`/crm/v3/objects/deals/${dealId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: { next_renewal_date: isoDate } }),
+  });
 }
