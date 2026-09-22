@@ -732,11 +732,11 @@ existing steps; there is no new table and no second state machine.
   contact phone is the fallback, also when the lookup fails —
   `src/steps/whatsappRecipient.ts`). Email via Zoho Books
   `POST /estimates|invoices/{id}/email` (`to_mail_ids` = the deal's
-  **Accountant Email 1–3** (`accountant_email`, `accountant_email_2`,
-  `accountant_email_3`, added 2026-09-22; HubSpot validates each as one
-  address, so several recipients need several fields — 2 and 3 are created
-  by the team in HubSpot, the app token lacks the schema scope) and nothing
-  else — every valid, distinct address gets the mail; with none,
+  **Accountant Email** (`accountant_email`, added 2026-09-22: a plain-text
+  field holding any number of addresses separated by commas, semicolons or
+  spaces — `parseEmailList`; the field must stay plain text, an
+  email-validated field rejects a list) and nothing else — every valid,
+  distinct address in it gets the mail; with none,
   `HubspotDeal.billingEmails` is empty, no email is sent and the step
   records "no Accountant Email on the HubSpot deal" as `email_error` (business decision 2026-09-22: no
   fallback to the contact; the Billing POC Email field is not used). The
@@ -792,10 +792,10 @@ existing steps; there is no new table and no second state machine.
   **Paid through Yes Bank** and **Record manual payment**
   (`POST /admin/pricing/record-payment`; both take the real payment date,
   which becomes HubSpot's Date Paid). The Clients table shows and edits each
-  deal's three Accountant Email fields in place (`POST
-  /admin/pricing/accountant-email` with `emails[3]` → one PATCH of all
-  three; blank clears a field; junk values such as "NA" are shown as
-  ignored). One-time quote column and "One-time quotes" table
+  deal's Accountant Email list in place (`POST
+  /admin/pricing/accountant-email` with the list as typed → PATCH of the
+  field joined with ", "; blank clears it; junk tokens such as "NA" are
+  shown as ignored). One-time quote column and "One-time quotes" table
   — see §3.7c. Still unauthenticated — business decision.
 - **Timezone**: every date goes through `src/utils/billingCycle.ts`
   (fixed +05:30 arithmetic on UTC getters). HubSpot's epoch-ms dates are

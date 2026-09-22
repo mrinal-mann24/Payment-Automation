@@ -5,6 +5,7 @@ import {
   asEmail,
   fetchVaDealEmails,
   fetchVaDealsWithLineItems,
+  parseEmailList,
   updateDealAccountantEmails,
   type DealEmails,
 } from "../clients/hubspot.js";
@@ -76,13 +77,15 @@ function billingView(classification: DealClassification, today: string, jobs: Re
   };
 }
 
-// Where this deal's quotes and invoices are emailed: every Accountant
-// Email field (1–3) that is a real address, otherwise nowhere.
+// Where this deal's quotes and invoices are emailed: every address in the
+// Accountant Email list, otherwise nowhere.
+function invalidEmailTokens(value: string): string[] {
+  return value.split(/[,;\s]+/).filter((token) => token && asEmail(token) === null);
+}
+
 function emailView(emails: DealEmails | undefined) {
-  const accountantEmails = emails?.accountantEmails ?? [null, null, null];
-  const sendsTo = [...new Set(accountantEmails.map((e) => asEmail(e)).filter((e): e is string => e !== null))];
-  const invalid = accountantEmails.filter((e): e is string => Boolean(e) && asEmail(e) === null);
-  return { accountantEmails, sendsTo, invalid };
+  const accountantEmail = emails?.accountantEmail ?? null;
+  return { accountantEmail, sendsTo: parseEmailList(accountantEmail), invalid: invalidEmailTokens(accountantEmail ?? "") };
 }
 
 // One-time quotes: PAID once the Razorpay webhook has converted the invoice.
@@ -185,12 +188,11 @@ pricingAdminRouter.post("/admin/pricing/base-price", async (req: Request, res: R
   }
 });
 
-// The three Accountant Email fields live on the HubSpot deal; the page
-// edits them in place. A blank field clears it; with all three blank no
-// email is sent.
+// The Accountant Email list lives on the HubSpot deal; the page edits it
+// in place. Blank clears it, and then no email is sent.
 const accountantEmailsSchema = z.object({
   dealId: z.string().min(1),
-  emails: z.array(z.string().trim().max(200)).length(3),
+  emails: z.string().trim().max(600),
 });
 
 pricingAdminRouter.post("/admin/pricing/accountant-email", async (req: Request, res: Response) => {
@@ -199,16 +201,16 @@ pricingAdminRouter.post("/admin/pricing/accountant-email", async (req: Request, 
     res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
     return;
   }
-  const invalid = parsed.data.emails.filter((email) => email !== "" && asEmail(email) === null);
+  const invalid = invalidEmailTokens(parsed.data.emails);
   if (invalid.length) {
     res.status(400).json({ error: `Not a valid email address: ${invalid.join(", ")}` });
     return;
   }
-  const emails = parsed.data.emails.map((email) => (email === "" ? null : asEmail(email)));
+  const emails = parseEmailList(parsed.data.emails);
 
   try {
     await updateDealAccountantEmails(parsed.data.dealId, emails);
-    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> accountant emails updated (${emails.filter(Boolean).length} set)`);
+    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> accountant emails updated (${emails.length} set)`);
     res.status(200).json({ ok: true, emails });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

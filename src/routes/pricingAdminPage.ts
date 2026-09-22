@@ -160,7 +160,7 @@ export const pricingAdminHtml = `<!doctype html>
     <div class="card-head">
       <h2>Clients</h2>
       <span class="count" id="deals-count"></span>
-      <p>How each client is billed: the cycle length from the latest HubSpot line item's term, the quote date from the deal's <strong>Next Renewal Date</strong>. Quotes go out automatically at 11:00 IST on that date, and the date moves forward by one cycle when the client pays. Quotes and invoices are emailed <strong>only</strong> to the <strong>Accountant emails</strong> (up to three, HubSpot's Accountant Email 1–3 fields; saving writes them back to HubSpot). With none set, nothing is emailed and the client gets WhatsApp only.</p>
+      <p>How each client is billed: the cycle length from the latest HubSpot line item's term, the quote date from the deal's <strong>Next Renewal Date</strong>. Quotes go out automatically at 11:00 IST on that date, and the date moves forward by one cycle when the client pays. Quotes and invoices are emailed <strong>only</strong> to the <strong>Accountant emails</strong> (HubSpot's Accountant Email field, any number of addresses separated by commas; saving writes it back to HubSpot). With none set, nothing is emailed and the client gets WhatsApp only.</p>
     </div>
     <div class="table-wrap">
       <table>
@@ -169,7 +169,7 @@ export const pricingAdminHtml = `<!doctype html>
             <th style="min-width:200px">Deal</th>
             <th style="width:130px">Stage</th>
             <th style="min-width:250px">Billing</th>
-            <th style="width:270px">Accountant emails</th>
+            <th style="width:300px">Accountant emails</th>
             <th style="width:230px">Base price / month</th>
             <th style="min-width:460px">One-time quote</th>
           </tr>
@@ -391,25 +391,20 @@ function billingCell(deal) {
 function emailCell(deal) {
   const td = document.createElement('td');
   const e = deal.email;
-  const inputs = [0, 1, 2].map((i) => {
-    const input = document.createElement('input');
-    input.type = 'email';
-    input.className = 'mono';
-    input.value = e.accountantEmails[i] ?? '';
-    input.placeholder = i === 0 ? 'Accountant email' : 'Email ' + (i + 1) + ' (optional)';
-    input.style.marginBottom = '0.3rem';
-    td.appendChild(input);
-    return input;
-  });
-  const row = el('div', 'row-actions');
+  const row = el('div', 'field-row');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'mono';
+  input.value = e.accountantEmail ?? '';
+  input.placeholder = 'email1, email2, email3';
   const saveBtn = el('button', 'btn secondary small', 'Save');
   saveBtn.type = 'button';
   saveBtn.onclick = async () => {
-    const emails = inputs.map((input) => input.value.trim());
+    const emails = input.value.trim();
     const done = busy(saveBtn, 'Saving');
     try {
-      await postJson('/admin/pricing/accountant-email', { dealId: deal.dealId, emails });
-      const count = emails.filter(Boolean).length;
+      const result = await postJson('/admin/pricing/accountant-email', { dealId: deal.dealId, emails });
+      const count = result.emails.length;
       toast('ok', deal.dealName + ': ' + (count ? count + (count === 1 ? ' accountant email' : ' accountant emails') + ' saved to HubSpot' : 'accountant emails cleared — no email will be sent'));
       await loadDeals();
     } catch (err) {
@@ -417,6 +412,7 @@ function emailCell(deal) {
       done();
     }
   };
+  row.appendChild(input);
   row.appendChild(saveBtn);
   td.appendChild(row);
   if (e.sendsTo.length) {

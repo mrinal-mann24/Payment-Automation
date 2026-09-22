@@ -126,6 +126,14 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (email list) — The team reverted `accountant_email` to a
+  plain-text field, so several recipients now live in that one field as a
+  comma-separated list (`parseEmailList`: commas, semicolons or spaces;
+  junk ignored, duplicates dropped). The three-field variant of a few
+  hours earlier is gone; `accountant_email_2/_3` are not needed. The page
+  has one box per client ("email1, email2, email3") and shows how many
+  addresses will be mailed. Verified live: HubSpot accepts the two-address
+  value on the test deal. 184/184.
 - 2026-09-22 (three accountant emails) — HubSpot validates
   `accountant_email` as a single address (a comma-separated pair is
   rejected with INVALID_EMAIL), so multiple recipients use three fields:
