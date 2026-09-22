@@ -283,8 +283,8 @@ could be minutes or weeks after step 3.
   reminders now go to the client's WhatsApp **group** when
   `clients.whatsapp_group_id` is set (see §3.8), with the contact phone as
   the fallback; `toChatId` accepts a phone or a group id (`<18 digits>` →
-  `<id>@g.us`, `…@g.us` passed through). Addition charges are unchanged
-  (individual chat). Doc correction: the invoice-PDF call above is
+  `<id>@g.us`, `…@g.us` passed through). Addition charges (one-time
+  quotes) use the same rule since 2026-09-22 — §3.7c. Doc correction: the invoice-PDF call above is
   `GET /invoices/pdf?invoice_ids={id}` — the `estimate_ids` wording was a
   doc error, the code was always `invoice_ids`.
 
@@ -535,6 +535,25 @@ from the renewal cycle — own Zoho quote, own Razorpay link, own WhatsApp
 send, never touching `renewal_jobs` or the renewal total (see the
 revision note in §3.7b for why).
 
+**Revision 2026-09-22 — one-time quotes.** The business flow calls these
+"one-time payments": a service name + optional narration entered on the
+admin page, sent as a quote to the client's WhatsApp **group** and by
+**email**, exactly like a renewal quote. `createAdditionCharge(dealId,
+amount, service, narration)` now names the Zoho line after the service
+with the narration as its description (`reference_number =
+"<dealId>/one-time-<row id prefix>"`), delivers through
+`resolveWhatsappRecipient` (group, phone fallback) and `emailEstimate`,
+and records each channel on the row — `narration`, `periskope_sent`,
+`periskope_skip_reason`, `estimate_email_sent`, `invoice_email_sent`,
+`email_error` (migration `0011`). Delivery is best-effort: a WhatsApp or
+email failure no longer marks the charge failed. On payment the Razorpay
+webhook converts the invoice, sends the confirmation to the group and
+emails the invoice (`sendAdditionInvoiceEmail`). The admin page lists
+every one-time quote with its paid status and delivery. Still no HubSpot
+write, and not covered by the settlement sweep (Razorpay redelivery only).
+The paragraphs below describe the original 2026-07-31 flow where they
+differ.
+
 **Table**: `addition_charges` (`supabase/migrations/0006_addition_charges.sql`,
 `0007_addition_charges_invoice.sql`, both applied live) —
 `hubspot_deal_id`, `amount`, `description`, `zoho_estimate_id`/`_number`/`_total`,
@@ -653,104 +672,126 @@ WhatsApp identifier from the HubSpot contact's `phone` property instead
 (see §3.6). Revisit if `clients`/`client_contacts` should become the
 source of truth later — they already carry real production data.
 
-### 3.8 Monthly billing cycles, manual payments, group + email delivery (added 2026-09-22)
+### 3.8 Billing cycles — monthly and term (quarterly / half-yearly), manual payments, group + email delivery (added 2026-09-22)
 Spec: `context/features/step6.md`. Decisions confirmed by the business
-2026-09-21. Everything below reuses `renewal_jobs` and the existing steps;
-there is no new table and no second state machine.
+2026-09-21 (monthly) and 2026-09-22 (term cycles). Everything below reuses
+`renewal_jobs` and the existing steps; there is no new table and no second
+state machine.
 
-- **Classification** (`src/utils/monthlyEligibility.ts::classifyDeal`; data
-  from `src/clients/hubspot.ts::fetchVaDealsWithLineItems` — deal search +
-  `POST /crm/v4/associations/deals/line_items/batch/read` +
-  `POST /crm/v3/objects/line_items/batch/read` chunked by 100, ~4 calls for
-  28 deals): monthly ⇔ deal `billing_cycle = "Monthly"` AND the latest line
-  item by `billing_term_end_date` has `recurringbillingfrequency = "monthly"`
-  and `hs_recurring_billing_period = "P1M"`. Undated items are ignored; a
-  tie with different frequencies, an unreadable line item or any other
-  frequency is "not monthly" (fails closed) and stays on the legacy flow.
-  `billing_term_end_date` is HubSpot's calculated exclusive end (epoch-ms
-  string) — an item ending on the 1st means that month is not yet billed;
-  one ending later means "already billed through". Dry run 2026-09-21 for
-  the October cycle: 15 monthly & due, 2 monthly but paid past 1 Oct, 11
-  not monthly.
-- **Cycle key**: `renewal_jobs.billing_period = "YYYY-MM"` (IST month), so
-  the existing unique constraint is the customer + month key; legacy rows
-  keep `${billing_cycle}-${next_renewal_date}`. Only monthly rows have
-  `service_period_start`.
-- **Generation** (`src/jobs/monthlyBillingCron.ts`): one classification per
-  11:00 IST tick feeds both `runMonthlyBillingCheck` (IST days 1–4, so a
-  missed 1st is retried before the first reminder; skips deals already
-  billed past the 1st and deals with an unpaid legacy quote; ~5 s between
-  deals) and the legacy `runRenewalCheck(monthlyDealIds, now)` (skips
-  monthly deals — their new line item ends on the 1st of next month, so
-  Neon would otherwise report them due; Neon queried by IST date). If
-  classification fails, neither job bills that tick. `POST /webhooks/renewal`
-  classifies the same way (409 for a monthly deal already billed). Shared
-  step sequence: `src/jobs/renewalPipeline.ts` — a WhatsApp throw is
-  recorded, not fatal, so the email still goes and the next run retries.
-- **Quote content** (`createEstimate(customerId, deal, cycle)`): one line
-  `name: "Virtual Accounting"`, `description: "Service period: 1 October
-  2026 to 31 October 2026"`, quantity 1, rate = `client_pricing.base_price`
-  (a monthly cycle refuses to bill without a pricing row rather than guess
-  from the unordered `lineItems[0]`), `reference_number = "<dealId>/<YYYY-MM>"`.
-  The invoice inherits it through conversion. Monthly cycles no longer
-  write the quote-time log-back line item to HubSpot (§3.7b item 3).
+- **Classification** (`src/utils/monthlyEligibility.ts::classifyDeal(deal,
+  today)`; data from `src/clients/hubspot.ts::fetchVaDealsWithLineItems` —
+  deal search + `POST /crm/v4/associations/deals/line_items/batch/read` +
+  `POST /crm/v3/objects/line_items/batch/read` chunked by 100): decided
+  from the **latest line item's Term** (`hs_recurring_billing_period`)
+  alone. The deal-level `billing_cycle` field and the frequency label are
+  ignored — the deal field is wrong on five live deals, while the line item
+  is what the team records for every payment (97/97 carry Date Paid).
+  Latest = max `billing_term_end_date` (HubSpot's calculated, exclusive
+  end, epoch-ms string); undated items are ignored; a tie with different
+  terms fails closed.
+  - `P1M` → **monthly**: due when the latest end ≤ the 1st of the current
+    IST month, otherwise "already billed through …".
+  - `P3M` / `P6M` → **term** (quarterly / half-yearly): `periodStart` =
+    the latest end date, due once it is ≤ today, `lastPaid` = the latest
+    item's `price × quantity`.
+  - any other term (e.g. `P7M`) → **unsupported**: nothing bills it
+    automatically; the reason shows on the admin page.
+  - yearly (`P1Y` / `P12M`), no usable term, no dated item, unreadable →
+    **none**: the legacy due-date flow (§3.1), as before.
+  Live 2026-09-22: 17 monthly, 3 quarterly, 2 half-yearly, 2 yearly,
+  1 unsupported, 3 with no dated line item.
+- **Cycle key**: `billing_period = "YYYY-MM"` for a monthly cycle and the
+  period start date `"YYYY-MM-DD"` for a term cycle, so the existing unique
+  constraint is the customer + cycle key. Both carry `service_period_start`
+  and `term_months` (1 / 3 / 6, migration `0011`); legacy rows keep
+  `${billing_cycle}-${next_renewal_date}` and null. The service period is
+  start + term − 1 day (`servicePeriodFrom`), e.g. "Service period:
+  9 October 2026 to 8 January 2027".
+- **Generation** (`src/jobs/billingCycleCron.ts::runBillingCycleCheck`):
+  one classification per 11:00 IST tick. A cycle is generated the day it
+  starts — the 1st for monthly, the day the last term ended otherwise —
+  and retried for three more days (`GENERATION_WINDOW_DAYS = 4`). Anything
+  older is never auto-quoted; it waits for **Quote now** on the admin page,
+  so a client whose HubSpot record is merely behind is not chased
+  automatically. Skips deals with an unpaid legacy quote; ~5 s between
+  deals. The legacy `runRenewalCheck(cycleDealIds, now)` skips every deal a
+  cycle owns (monthly, term, unsupported). `src/jobs/generateRenewalQuote.ts`
+  is the on-demand path behind `POST /admin/pricing/generate-quote` and
+  `POST /webhooks/renewal`: same classification, no window, and a
+  `QuoteNotDueError` (409) for a not-due, unsupported or unlisted deal —
+  the webhook no longer falls back to the legacy flow for a deal outside
+  the active VA list. Shared step sequence: `src/jobs/renewalPipeline.ts`.
+- **Quote content** (`createEstimate(customerId, deal, line)`): one line
+  `name: "Virtual Accounting"` with the service period as `description`,
+  quantity 1. Rate = `client_pricing.base_price` for a monthly cycle (it
+  refuses to bill without a pricing row rather than guess) and the
+  **last-paid amount** for a term cycle (decision 2026-09-22: "same as
+  last paid"; the admin page shows it beside the term). `reference_number
+  = "<dealId>/<key>"`. `billed_price` = the pre-tax amount of the quote.
+  The invoice inherits the line through conversion. No quote-time
+  log-back line item to HubSpot.
 - **Delivery**: WhatsApp to `clients.whatsapp_group_id` (a table owned by
   another system in the same Supabase project, read-only via
-  `src/repositories/clients.ts`; 24 of the 27 billed deals have one; bare
-  18-digit ids become `<id>@g.us`; contact phone is the fallback, also when
-  the lookup fails — `src/steps/whatsappRecipient.ts`). Email via Zoho
-  Books `POST /estimates|invoices/{id}/email` (`to_mail_ids` = the HubSpot
+  `src/repositories/clients.ts`; bare 18-digit ids become `<id>@g.us`;
+  contact phone is the fallback, also when the lookup fails —
+  `src/steps/whatsappRecipient.ts`). Email via Zoho Books
+  `POST /estimates|invoices/{id}/email` (`to_mail_ids` = the HubSpot
   contact's `email`, explicit subject/body carrying the Razorpay link),
   best-effort: `estimate_email_sent` / `invoice_email_sent` / `email_error`.
   **Not yet exercised live** — scope and PDF-attachment behaviour to confirm.
 - **Settlement** (`src/steps/settleRenewalPayment.ts` — the Razorpay
-  webhook, "Paid through Yes Bank", "Add One-Time Payment" and the daily
+  webhook, "Paid through Yes Bank", "Record manual payment" and the daily
   sweep all call it): `claimPayment` sets `paid_at` + `payment_*` only
   while `paid_at IS NULL` (first writer wins; a real second payment is
   written to `error_log` as `duplicate_payment`); a non-Razorpay payment
-  cancels the Razorpay link first (`cancelPaymentLink`, tolerant of
-  already-cancelled, loud on already-paid); then invoice conversion,
-  WhatsApp confirmation, invoice email and HubSpot each run independently
-  with errors collected. `convertZohoInvoice` now needs only an estimate
-  (bank payments can settle even if link creation failed) and reclaims
-  `failed` / stale `converting` steps. An in-memory in-flight set rejects
-  overlapping settlements of one cycle (webhook 503 → Razorpay retries;
-  admin 409). The webhook answers 502 while any step is outstanding so
-  Razorpay redelivers; `src/jobs/settlementSweep.ts` is the daily retry
-  for manual payments, which have no retries behind them.
-- **HubSpot on payment** (`markRenewalDone`): monthly cycles create ONE
-  complete line item (`recurringbillingfrequency: monthly`,
-  `hs_recurring_billing_period: P1M`, `hs_recurring_billing_start_date` =
-  period start, `date_renewed` = payment date, `recurring_revenue_type:
-  Renewal`, price = `billed_price`, product/name copied from the latest
-  item), adopting one the team already entered for the same start date,
-  and store `hubspot_line_item_id` before the dealstage PATCH. HubSpot then
-  calculates `billing_term_end_date` = 1st of next month, which is what
-  makes the next month classify as due. Legacy cycles keep the bare copy,
-  now priced at `billed_price`.
-- **Reminders** (`src/jobs/reminderCron.ts`, re-enabled): IST days 5–6 →
-  stage 1, 7–8 → 2, 9–10 → 3 (one-day grace for a missed tick; one stage
-  per run), only for rows with `billing_period` = current IST month,
-  `razorpay_step_status = done`, `paid_at IS NULL` — legacy keys never
-  match, so non-monthly customers get none. `claimReminder` stamps
-  `reminder_N_sent_at` only while unsent AND unpaid, right before the send;
-  `releaseReminder` on a failed send. A link Razorpay reports as paid is
-  settled instead of reminded (lost-webhook guard). Copy is still the
-  `step5.md` placeholder.
-- **Admin** (`/admin/pricing`): Billing column (Monthly / Not monthly +
-  reason) and a Billing-cycles table (current month + unpaid rows) with
-  `POST /admin/pricing/record-payment {jobId, method, amount?, paymentDate?,
-  narration?, reference?}`. Still unauthenticated — business decision.
+  cancels the Razorpay link first; then invoice conversion, WhatsApp
+  confirmation, invoice email and HubSpot each run independently with
+  errors collected. An in-memory in-flight set rejects overlapping
+  settlements of one cycle (webhook 503, admin 409); the webhook answers
+  502 while any step is outstanding so Razorpay redelivers;
+  `src/jobs/settlementSweep.ts` is the daily retry for manual payments.
+- **HubSpot on payment** (`markRenewalDone` → `createRenewalLineItem(dealId,
+  {…, months})`): ONE complete Renewal line item per paid cycle —
+  `recurringbillingfrequency` monthly / quarterly / per_six_months,
+  `hs_recurring_billing_period` P1M / P3M / P6M, start = period start,
+  `date_renewed` = payment date, `recurring_revenue_type: Renewal`, price =
+  `billed_price`, quantity 1, product/name copied from the latest item —
+  adopting one the team already entered for the same start date, with
+  `hubspot_line_item_id` stored before the dealstage PATCH. HubSpot's
+  calculated end date is then the next cycle's start, so the classifier
+  finds the client again without anyone typing a line item. Legacy cycles
+  keep the bare copy priced at `billed_price`.
+- **Reminders** (`src/jobs/reminderCron.ts`): every unpaid cycle with a
+  service period (`findUnpaidCycleJobs`: `service_period_start` set,
+  `razorpay_step_status = done`, `paid_at IS NULL`) gets its stage from its
+  **own start date** — days 5–6 / 7–8 / 9–10 of the cycle → stage 1 / 2 / 3,
+  i.e. the 5th/7th/9th of the month for a monthly cycle and 4 / 6 / 8 days
+  after the quote for a term. One stage per run, one-day grace for a
+  missed tick. `claimReminder` stamps `reminder_N_sent_at` only while
+  unsent AND unpaid, right before the send; `releaseReminder` on a failed
+  send. A link Razorpay reports as paid is settled instead of reminded.
+  Legacy rows are never reminded. Copy matches the business flowchart.
+- **Admin** (`/admin/pricing`): Billing column shows Monthly / Quarterly /
+  Half-yearly / Unsupported / Not billed with the reason, the next term
+  start and last-paid amount, and a **Quote now** button whenever a deal is
+  due and its cycle has no row yet. Billing-cycles table (unpaid rows plus
+  any cycle started this month) with **Paid through Yes Bank** and
+  **Record manual payment** (`POST /admin/pricing/record-payment`).
+  One-time quote column and "One-time quotes" table — see §3.7c. Still
+  unauthenticated — business decision.
 - **Timezone**: every date goes through `src/utils/billingCycle.ts`
-  (fixed +05:30 arithmetic on UTC getters — identical on the UTC container
-  and an IST dev machine). HubSpot's epoch-ms dates are calendar dates and
-  are never shifted; Razorpay `created_at` (seconds) is converted to IST.
-- **Rollout**: first automated cycle is October 2026 — a September deploy
-  generates nothing (IST day > 4) and no reminder matches (no `YYYY-MM`
-  rows exist). Review the admin page's classification list with the
-  business before 1 Oct. No Zoho customer payment is recorded (unchanged):
-  if Zoho's own automated payment reminders are on, Zoho will chase paid
-  customers.
+  (fixed +05:30 arithmetic on UTC getters). HubSpot's epoch-ms dates are
+  calendar dates and are never shifted; Razorpay `created_at` (seconds) is
+  converted to IST.
+- **Rollout**: the first automated monthly cycle is October 2026. Term
+  cycles start at go-live: Laundry Labs (quarterly, INR 39,000) is due
+  9 October; Piyush (ended 19 Sep) and Ankit Yadav (ended 10 Aug) are past
+  the window and show **Quote now** for the team to decide; Down The Rabbit
+  Hole (P7M, ends 30 Sep) is unsupported and billed by nobody until its
+  line item is corrected; three deals with no dated line item are never
+  billed. Review the admin page with the business before 1 October. No
+  Zoho customer payment is recorded (unchanged): if Zoho's own automated
+  payment reminders are on, Zoho will chase paid customers.
 
 ## 4. Idempotency
 - Re-running the cron (or manually re-triggering `/webhooks/renewal`) for

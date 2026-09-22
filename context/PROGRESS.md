@@ -24,7 +24,8 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
 | 10 — Monthly billing cycles (calendar-month quotes, "Virtual Accounting / Service period: …") | `context/features/step6.md` | Done — unit-tested; live verification pending | Migration `0010` applied live. Generator runs IST days 1–4; first cycle is October 2026. Classification rendered live on the admin page 2026-09-22 (28 deals). See the 2026-09-22 changelog. |
 | 11 — WhatsApp group + Zoho email delivery | `context/features/step6.md` | Done — live verification pending | Group id from `clients.whatsapp_group_id` (24/27 billed deals have one; contact phone fallback). Email via Zoho Books' email API — **not yet exercised live** (token scope, PDF attachment, DRAFT→SENT side effect to confirm). |
 | 12 — One settlement path (Razorpay / Yes Bank / manual) + HubSpot Renewal line item | `context/features/step6.md` | Done — unit-tested; live verification pending | `settleRenewalPayment` with atomic `claimPayment`, Razorpay link cancelled on manual payment, independent idempotent steps, daily sweep; `markRenewalDone` creates one complete HubSpot line item and stores its id. |
-| 13 — Admin billing-cycle view + "Paid through Yes Bank" / "Add One-Time Payment" | n/a | Done — rendered live 2026-09-22 | `/admin/pricing` shows Monthly / Not monthly (+ reason) per deal and a Billing-cycles table; `POST /admin/pricing/record-payment`. Still no auth (business decision). |
+| 13 — Admin billing-cycle view + "Paid through Yes Bank" / "Record manual payment" | n/a | Done — rendered live 2026-09-22 | `/admin/pricing` shows the billing kind (+ reason) per deal, a Billing-cycles table and `POST /admin/pricing/record-payment`. "Add One-Time Payment" renamed 2026-09-22 (it records a payment; it never created one). Still no auth (business decision). |
+| 14 — Term billing cycles (quarterly / half-yearly), Quote now, one-time quotes to group + email | `context/features/step6.md` | Done — unit-tested; live verification pending | Cycle decided from the latest line item's Term; term cycles quoted the day the last term ends at the last-paid amount, reminded 4/6/8 days later, HubSpot line item with the same term. `POST /admin/pricing/generate-quote` ("Quote now") for anything past the 4-day window. One-time quotes take service + narration and go to the group and by email. Migration `0011` applied live. 168/168. |
 
 ## Blocked / open questions
 - No auth on `/admin/pricing` or its two POST endpoints — anyone who
@@ -55,9 +56,19 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (none exists on the test deal's `clients` row yet), a HubSpot
   `createRenewalLineItem` (does `hs_product_id` override name/price?),
   Razorpay `cancelPaymentLink`, a simulated `payment_link.paid` delivered
-  twice, and "Paid through Yes Bank" / "Add One-Time Payment" from the
-  admin page. All sends reach real channels, so these need an explicit
-  go-ahead.
+  twice, "Paid through Yes Bank" / "Record manual payment" from the admin
+  page, a **one-time quote** (service + narration → group + email), **Quote
+  now** on a stale term, and a quarterly-term HubSpot line item
+  (`quarterly/P3M`). All sends reach real channels, so these need an
+  explicit go-ahead.
+- **Go-live data checks (2026-09-22):** Piyush (term ended 19 Sep) and
+  Ankit Yadav (10 Aug) are past the 4-day window and are never auto-quoted
+  — the team decides with Quote now. Laundry Labs is the first automated
+  term quote (9 Oct, INR 39,000 = last paid). Down The Rabbit Hole's
+  `P7M` line item (ends 30 Sep) is unsupported: nothing bills it until
+  the line item is corrected in HubSpot. Rapheal, MD Afreed and SLV Trades
+  have no dated line item and are never billed. Yearly (Sahil, the test
+  deal) stays on the legacy due-date flow.
 - Zoho org setting to check before October: no Zoho customer payment is
   recorded (unchanged), so if Zoho's own automated payment reminders are
   on, Zoho will chase customers we have marked paid.
@@ -114,6 +125,34 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (later) — Gap fixes against the business flowchart: quarterly
+  and half-yearly clients were outside the flow, one-time quotes went to a
+  personal number with no email, and "Add One-Time Payment" was misnamed.
+  TDD checkpoint commits (RED confirmed before every production change;
+  `npm run typecheck` clean and `npm test` green after each) — 168/168 at
+  the end, up from 126/126:
+  1. Migration `0011_term_cycles_and_addition_delivery.sql` (applied
+     live): `renewal_jobs.term_months`; `addition_charges.narration`,
+     `periskope_sent`, `periskope_skip_reason`, `estimate_email_sent`,
+     `invoice_email_sent`, `email_error`.
+  2. `classifyDeal(deal, today)` decides from the latest line item's Term
+     (monthly / term / unsupported / none); `billingCycle.ts` gains
+     `servicePeriodFrom`, `termBillingCycle`, `daysBetween`.
+  3. `src/jobs/billingCycleCron.ts` (was `monthlyBillingCron.ts`) with
+     the 4-day generation window for both kinds; `src/jobs/generateRenewalQuote.ts`
+     behind `POST /admin/pricing/generate-quote` and `/webhooks/renewal`.
+  4. Term quotes at the last-paid amount (`EstimateLine` on
+     `createEstimate`), `term_months` recorded; `createRenewalLineItem`
+     writes the cycle's frequency + term.
+  5. Reminders per cycle from its own start date (`findUnpaidCycleJobs`,
+     `reminderStageForJob`).
+  6. One-time quotes: service + narration, group + email, invoice email on
+     payment, delivery recorded on `addition_charges`.
+  7. Admin page: billing kind badges, Quote now, one-time quote inputs and
+     table, "Record manual payment". Rendered live (28 deals).
+  Decisions 2026-09-22: term price = same as last paid; terms that ended
+  before go-live are not auto-quoted; yearly stays legacy; P7M unsupported.
+  Files: `context/ARCHITECTURE.md` §3.5, §3.7c, §3.8; `context/features/step6.md`.
 - 2026-09-22 — Monthly billing cycles for VA customers (spec:
   `context/features/step6.md`; design decisions confirmed with the
   business 2026-09-21; `ARCHITECTURE.md` §3.8). Built as TDD checkpoint
