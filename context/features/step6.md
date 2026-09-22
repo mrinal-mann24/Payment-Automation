@@ -7,9 +7,10 @@ unchanged for yearly customers and deals with no usable line item.
 
 ## 1. Decisions (confirmed by the business, 2026-09-21 and 2026-09-22)
 - **Cycle length from the line item's Term.** The latest HubSpot line item's
-  `hs_recurring_billing_period` decides: `P1M` monthly, `P3M` quarterly,
-  `P6M` half-yearly. Yearly stays on the legacy due-date flow; any other
-  term (e.g. `P7M`) is unsupported and billed by nobody until corrected.
+  `hs_recurring_billing_period` decides: any whole number of months under
+  a year is a cycle of that length (`P1M` monthly, `P3M` quarterly, `P6M`
+  half-yearly, `P7M` every 7 months …). A year or longer stays on the
+  legacy due-date flow.
 - **Quote date from the deal's Next Renewal Date.** A client is quoted on
   HubSpot's `next_renewal_date`, for one cycle length from that day, at the
   `client_pricing` base price (monthly) or what they paid last time (terms:
@@ -42,7 +43,7 @@ unchanged for yearly customers and deals with no usable line item.
 - **Admin auth:** left open (business decision, see `ARCHITECTURE.md` §3.7c).
 
 ## 2. Requirements (EARS)
-- REQ-6.1 WHEN a deal's latest line item term is `P1M`, `P3M` or `P6M` and
+- REQ-6.1 WHEN a deal's latest line item term is under a year and
   its Next Renewal Date is today or within the last three days, the system
   SHALL create one `renewal_jobs` row keyed `(hubspot_deal_id, <that date>)`,
   a Zoho estimate whose single line reads **Virtual Accounting** with
@@ -51,11 +52,10 @@ unchanged for yearly customers and deals with no usable line item.
   WhatsApp group message with the quote PDF, and — when the Accountant
   Email is set — a Zoho email.
 - REQ-6.2 The system SHALL NOT auto-quote a deal whose Next Renewal Date is
-  blank, in the future, or passed four or more days ago, an unsupported
-  term, or a deal with an unpaid legacy quote; the legacy cron SHALL skip
-  every deal a cycle owns. `POST /webhooks/renewal` SHALL quote any due deal
-  regardless of the window and refuse (409) a not-due, unsupported or
-  unlisted one.
+  blank, in the future, or passed four or more days ago, or a deal with
+  an unpaid legacy quote; the legacy cron SHALL skip every deal a cycle
+  owns. `POST /webhooks/renewal` SHALL quote any due deal regardless of
+  the window and refuse (409) a not-due or unlisted one.
 - REQ-6.3 A cycle is PAID ⇔ `renewal_jobs.paid_at` is set. Razorpay
   (webhook), "Paid through Yes Bank" and manual entry SHALL all set it
   through the same `settleRenewalPayment` path: record payment → cancel
@@ -66,8 +66,9 @@ unchanged for yearly customers and deals with no usable line item.
   every settlement step SHALL be independent and idempotent; a daily sweep
   re-runs the unfinished steps of any paid cycle.
 - REQ-6.5 On payment the system SHALL write one HubSpot line item with the
-  cycle's frequency and term (`monthly/P1M`, `quarterly/P3M`,
-  `per_six_months/P6M`), start = period start, Date Paid = the payment date
+  cycle's term (`quarterly/P3M`, `per_six_months/P6M`, otherwise
+  `monthly/P<n>M` with quantity n and the monthly share as price), start =
+  period start, Date Paid = the payment date
   entered, price = the amount billed, adopting an item the team already
   entered for the same start date, and SHALL set the deal's Next Renewal
   Date to the day after the paid period.
@@ -106,6 +107,6 @@ unchanged for yearly customers and deals with no usable line item.
   a term-cycle HubSpot line item, the Next Renewal Date write-back and a
   one-time quote on the test deal — see `PROGRESS.md`.
 - 15 live deals have a blank, placeholder or passed Next Renewal Date and
-  are quoted only once the team sets it; Down The Rabbit Hole's `P7M`
-  line item is unsupported; three deals have no dated line item; every
+  are quoted only once the team sets it; three deals have no dated line
+  item; every
   Accountant Email is empty (WhatsApp only until filled).

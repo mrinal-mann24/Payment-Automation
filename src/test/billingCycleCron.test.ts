@@ -43,7 +43,7 @@ const deals: VaDealWithLineItems[] = [
   deal("stale", "2026-08-10", [item()]),
   deal("no-date", null, [item()]),
   deal("annual", "2026-10-01", [item({ billingPeriodTerm: "P1Y" })]),
-  deal("seven-month", "2026-10-01", [item({ billingPeriodTerm: "P7M" })]),
+  deal("seven-month", "2026-10-01", [item({ billingPeriodTerm: "P7M", quantity: 7, price: 3986 })]),
 ];
 
 // 11:00 IST on the given October 2026 day.
@@ -81,11 +81,11 @@ describe("classifyVaDeals", () => {
       ["stale", "cycle", true],
       ["no-date", "cycle", false],
       ["annual", "none", null],
-      ["seven-month", "unsupported", null],
+      ["seven-month", "cycle", true],
     ]);
   });
 
-  it("isBilledByCycles keeps cycle and unsupported deals away from the legacy due-date cron", async () => {
+  it("isBilledByCycles keeps every cycle deal away from the legacy due-date cron", async () => {
     const classified = await classifyVaDeals(istTick(1));
 
     expect(classified.deals.filter((d) => !isBilledByCycles(d.classification)).map((d) => d.dealId)).toEqual(["annual"]);
@@ -100,6 +100,7 @@ describe("runBillingCycleCheck", () => {
       ["due-1", "2026-10-01", 1, null],
       ["due-2", "2026-10-01", 1, null],
       ["quarterly-today", "2026-10-01", 3, 39000],
+      ["seven-month", "2026-10-01", 7, 27902],
     ]);
   });
 
@@ -127,7 +128,7 @@ describe("runBillingCycleCheck", () => {
 
     await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
 
-    expect(generated().map((g) => g[0])).toEqual(["due-2", "quarterly-today"]);
+    expect(generated().map((g) => g[0])).toEqual(["due-2", "quarterly-today", "seven-month"]);
   });
 
   it("keeps going when one deal fails", async () => {
@@ -135,6 +136,6 @@ describe("runBillingCycleCheck", () => {
 
     await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
 
-    expect(generated().map((g) => g[0])).toEqual(["due-1", "due-2", "quarterly-today"]);
+    expect(generated().map((g) => g[0])).toEqual(["due-1", "due-2", "quarterly-today", "seven-month"]);
   });
 });

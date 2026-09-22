@@ -85,7 +85,6 @@ export const pricingAdminHtml = `<!doctype html>
   .badge::before { content: ""; width: 0.42rem; height: 0.42rem; border-radius: 50%; background: currentColor; flex: none; }
   .badge.monthly { background: var(--blue-bg); color: var(--blue); }
   .badge.term { background: var(--indigo-bg); color: var(--indigo); }
-  .badge.unsupported { background: var(--amber-bg); color: var(--amber); }
   .badge.other { background: var(--grey-bg); color: var(--ink-2); }
   .badge.paid { background: var(--green-bg); color: var(--green); }
   .badge.payment_pending { background: var(--amber-bg); color: var(--amber); }
@@ -346,10 +345,10 @@ function renderStats(data) {
   const stats = [
     ['Active clients', deals.length, '', 'in the VA pipeline'],
     ['Monthly', monthly, '', 'quoted on their Next Renewal Date'],
-    ['Quarterly / half-yearly', term, '', 'quoted on their Next Renewal Date'],
+    ['Multi-month cycles', term, '', 'quarterly, half-yearly or any other term'],
     ['Quoting today', quotingToday, quotingToday ? 'good' : '', 'the 11:00 IST run sends these'],
     ['Renewal date needs fixing', datePassed, datePassed ? 'warn' : 'good', 'missing or passed without a quote'],
-    ['Needs HubSpot fix', attention, attention ? 'bad' : 'good', 'unsupported term or no line item'],
+    ['Needs HubSpot fix', attention, attention ? 'bad' : 'good', 'no usable line item'],
     ['No accountant email', noEmail, noEmail ? 'warn' : 'good', 'these clients get WhatsApp only'],
     ['Unpaid cycles', unpaid, unpaid ? 'warn' : 'good', 'awaiting payment'],
     ['One-time quotes', data.additions.length, '', 'sent so far'],
@@ -368,7 +367,7 @@ function renderStats(data) {
 function billingCell(deal) {
   const td = document.createElement('td');
   const b = deal.billing;
-  const badgeClass = b.kind === 'cycle' ? (b.months === 1 ? 'monthly' : 'term') : b.kind === 'unsupported' ? 'unsupported' : 'other';
+  const badgeClass = b.kind === 'cycle' ? (b.months === 1 ? 'monthly' : 'term') : 'other';
   td.appendChild(el('span', 'badge ' + badgeClass, b.label));
   if (b.kind !== 'cycle') {
     td.appendChild(el('div', 'sub', b.reason));

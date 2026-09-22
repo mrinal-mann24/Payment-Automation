@@ -350,10 +350,12 @@ export interface RenewalLineItemInput {
   productId: string | null;
   billingStartDate: string; // YYYY-MM-DD, first day of the paid period
   datePaid: string; // YYYY-MM-DD
-  months: number; // 1, 3 or 6 — the paid term
+  months: number; // the paid term in months
 }
 
-// HubSpot's "Billing frequency" label for each term the team uses.
+// HubSpot's "Billing frequency" label for the terms it has a word for; any
+// other term is written the way the team enters it: monthly frequency,
+// quantity = months, price = the monthly share of the amount billed.
 const TERM_FREQUENCY: Record<number, string> = { 1: "monthly", 3: "quarterly", 6: "per_six_months" };
 
 // One complete "Renewal" line item per paid cycle — the same shape the team
@@ -362,17 +364,15 @@ const TERM_FREQUENCY: Record<number, string> = { 1: "monthly", 3: "quarterly", 6
 // which is what the classifier and the Neon mirror's due_on read. Returns
 // the new line item's id.
 export async function createRenewalLineItem(dealId: string, input: RenewalLineItemInput): Promise<string> {
-  const frequency = TERM_FREQUENCY[input.months];
-  if (!frequency) {
-    throw new Error(`Cannot write a HubSpot line item for a ${input.months}-month term on deal ${dealId}`);
-  }
+  const frequency = TERM_FREQUENCY[input.months] ?? "monthly";
+  const units = frequency === "monthly" ? input.months : 1;
   const created = (await hubspotFetch(`/crm/v3/objects/line_items`, {
     method: "POST",
     body: JSON.stringify({
       properties: {
         name: input.name,
-        quantity: "1",
-        price: String(input.price),
+        quantity: String(units),
+        price: String(Math.round((input.price / units) * 100) / 100),
         recurringbillingfrequency: frequency,
         hs_recurring_billing_period: `P${input.months}M`,
         hs_recurring_billing_start_date: input.billingStartDate,

@@ -1,6 +1,6 @@
 import type { HubspotLineItem, VaDealWithLineItems } from "../clients/hubspot.js";
 
-export type CycleMonths = 1 | 3 | 6;
+export type CycleMonths = number; // 1–11: any whole number of months under a year
 
 // How a deal is billed. The cycle length comes from the latest line item's
 // Term (hs_recurring_billing_period); the date a client is quoted comes
@@ -8,13 +8,12 @@ export type CycleMonths = 1 | 3 | 6;
 // the term after each payment. The deal-level Billing Cycle field and the
 // line item's own dates play no part.
 //
-//   cycle        P1M / P3M / P6M — quoted on the Next Renewal Date for that
-//                many months: monthly at the client_pricing base price
-//                (amount null), longer terms at what the client paid last
-//                time (latest price × quantity)
-//   unsupported  any other term (e.g. P7M) — nothing bills it automatically
-//   none         yearly, no usable term, no dated line item, unreadable —
-//                left to the legacy due-date flow
+//   cycle        any term under a year (P1M, P3M, P6M, P7M …) — quoted on
+//                the Next Renewal Date for that many months: monthly at the
+//                client_pricing base price (amount null), longer terms at
+//                what the client paid last time (latest price × quantity)
+//   none         a year or longer, no usable term, no dated line item,
+//                unreadable — left to the legacy due-date flow
 export type DealClassification =
   | { kind: "cycle"; months: CycleMonths; due: true; periodStart: string; amount: number | null; latest: HubspotLineItem }
   | {
@@ -26,7 +25,6 @@ export type DealClassification =
       amount: number | null;
       latest: HubspotLineItem;
     }
-  | { kind: "unsupported"; reason: string }
   | { kind: "none"; reason: string };
 
 // HubSpot's Term is an ISO-8601 duration in whole months or years.
@@ -39,7 +37,7 @@ export function termMonths(term: string | null | undefined): number | null {
 }
 
 export function cycleLabel(months: CycleMonths): string {
-  return months === 1 ? "Monthly" : months === 3 ? "Quarterly" : "Half-yearly";
+  return months === 1 ? "Monthly" : months === 3 ? "Quarterly" : months === 6 ? "Half-yearly" : `Every ${months} months`;
 }
 
 // HubSpot stores a cleared date field as 1970-01-01 on some deals.
@@ -76,19 +74,13 @@ export function classifyDeal(
   if (months === null) {
     return { kind: "none", reason: `latest line item has no usable term (${term})` };
   }
-  if (months % 12 === 0) {
-    return { kind: "none", reason: `yearly term (${term}) is left to the due-date flow` };
-  }
-  if (months !== 1 && months !== 3 && months !== 6) {
-    return {
-      kind: "unsupported",
-      reason: `latest line item term is ${term} (${months} months); only 1, 3 or 6 month terms are billed automatically`,
-    };
+  if (months >= 12) {
+    return { kind: "none", reason: `yearly or longer term (${term}) is left to the due-date flow` };
   }
 
   const base = {
     kind: "cycle" as const,
-    months: months as CycleMonths,
+    months,
     amount: months === 1 ? null : latest.price * latest.quantity,
     latest,
   };

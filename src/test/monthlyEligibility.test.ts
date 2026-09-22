@@ -48,7 +48,7 @@ describe("termMonths", () => {
 
 describe("cycleLabel", () => {
   it("names the cycle by its length", () => {
-    expect(([1, 3, 6] as const).map(cycleLabel)).toEqual(["Monthly", "Quarterly", "Half-yearly"]);
+    expect([1, 3, 6, 7, 10].map(cycleLabel)).toEqual(["Monthly", "Quarterly", "Half-yearly", "Every 7 months", "Every 10 months"]);
   });
 });
 
@@ -109,11 +109,21 @@ describe("classifyDeal — not billed by cycles", () => {
     }
   });
 
-  it("flags an odd term such as P7M as unsupported so nothing bills it automatically", () => {
-    expect(classifyDeal(deal("2026-10-01", [item({ billingPeriodTerm: "P7M" })]), "2026-10-01")).toMatchObject({
-      kind: "unsupported",
-      reason: expect.stringMatching(/P7M/),
+  it("bills any number of months under a year as a cycle (the live P7M client: 3986 × 7)", () => {
+    const seven = item({ id: "li-7", billingPeriodTerm: "P7M", quantity: 7, price: 3986 });
+    expect(classifyDeal(deal("2026-10-01", [seven]), "2026-10-01")).toEqual({
+      kind: "cycle",
+      months: 7,
+      due: true,
+      periodStart: "2026-10-01",
+      amount: 27902,
+      latest: seven,
     });
+    expect(classifyDeal(deal("2026-10-01", [item({ billingPeriodTerm: "P11M" })]), "2026-10-01")).toMatchObject({ kind: "cycle", months: 11 });
+  });
+
+  it("leaves anything of a year or longer (P12M, P1Y, P18M) to the legacy due-date flow", () => {
+    expect(classifyDeal(deal("2026-10-01", [item({ billingPeriodTerm: "P18M" })]), "2026-10-01")).toMatchObject({ kind: "none", reason: expect.stringMatching(/year/i) });
   });
 
   it("is not billed when the latest item has no usable term", () => {

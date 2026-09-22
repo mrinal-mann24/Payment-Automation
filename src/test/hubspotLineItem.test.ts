@@ -58,3 +58,20 @@ describe("createRenewalLineItem", () => {
     }
   });
 });
+
+describe("createRenewalLineItem — other terms", () => {
+  it("writes a 7-month cycle the way the team does: monthly frequency, P7M, quantity 7, monthly price", async () => {
+    const captured = captureLineItemCreate();
+
+    await createRenewalLineItem("deal-1", { ...input, price: 27902, months: 7 });
+
+    expect(captured.body!.properties).toMatchObject({
+      recurringbillingfrequency: "monthly",
+      hs_recurring_billing_period: "P7M",
+      quantity: "7",
+      price: "3986",
+      hs_recurring_billing_start_date: "2026-10-09",
+      date_renewed: "2026-10-10",
+    });
+  });
+});

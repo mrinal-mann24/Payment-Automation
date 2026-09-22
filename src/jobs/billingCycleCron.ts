@@ -38,8 +38,8 @@ export async function classifyVaDeals(now: Date = new Date()): Promise<Classifie
   };
 }
 
-// Cycle and unsupported deals belong to the cycle logic; only "none"
-// (yearly, no usable line item) is left to the legacy due-date cron.
+// Only "none" (a year or longer, no usable line item) is left to the
+// legacy due-date cron.
 export function isBilledByCycles(classification: DealClassification): boolean {
   return classification.kind !== "none";
 }

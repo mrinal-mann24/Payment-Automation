@@ -686,10 +686,11 @@ existing steps; there is no new table and no second state machine.
   - the **cycle length** from the latest line item's Term
     (`hs_recurring_billing_period`; latest = max `billing_term_end_date`,
     undated items ignored, a tie with different terms fails closed):
-    `P1M` monthly, `P3M` quarterly, `P6M` half-yearly → `kind: "cycle"`;
-    any other term (e.g. `P7M`) → `unsupported`, billed by nobody; yearly
-    (`P1Y` / `P12M`), no usable term, no dated item, unreadable → `none`,
-    the legacy due-date flow (§3.1).
+    any whole number of months under a year (`P1M`, `P3M`, `P6M`, `P7M`
+    …) → `kind: "cycle"` for that many months (decision 2026-09-22: no
+    "unsupported" terms); a year or longer (`P1Y` / `P12M` / `P18M`), no
+    usable term, no dated item, unreadable → `none`, the legacy due-date
+    flow (§3.1).
   - the **quote date** from the deal's **Next Renewal Date**
     (`next_renewal_date`, decision 2026-09-22): due once it is ≤ today.
     Blank, or HubSpot's `1970-01-01` placeholder, means never due and the
@@ -754,10 +755,12 @@ existing steps; there is no new table and no second state machine.
   `src/jobs/settlementSweep.ts` is the daily retry for manual payments.
 - **HubSpot on payment** (`markRenewalDone`): ONE complete Renewal line
   item per paid cycle via `createRenewalLineItem(dealId, {…, months})` —
-  `recurringbillingfrequency` monthly / quarterly / per_six_months,
-  `hs_recurring_billing_period` P1M / P3M / P6M, start = period start,
+  `hs_recurring_billing_period` P<months>M, start = period start,
   `date_renewed` = the payment date entered by the accountant,
-  `recurring_revenue_type: Renewal`, price = `billed_price`, quantity 1 —
+  `recurring_revenue_type: Renewal`; 3 → `quarterly` and 6 →
+  `per_six_months` with quantity 1 and price = `billed_price`, every other
+  term the way the team enters it: `monthly` frequency, quantity = months,
+  price = `billed_price` / months —
   adopting one the team already entered for the same start date, with
   `hubspot_line_item_id` stored before anything else; then the deal's
   **Next Renewal Date is moved to the day after the paid period**
@@ -777,7 +780,7 @@ existing steps; there is no new table and no second state machine.
   reminded. Legacy rows are never reminded. Copy matches the business
   flowchart.
 - **Admin** (`/admin/pricing`): Billing column shows Monthly / Quarterly /
-  Half-yearly / Unsupported / Not billed with the next quote date ("Next
+  Half-yearly / Every N months / Not billed with the next quote date ("Next
   quote on …, automatic at 11:00 IST"), the last-paid amount for terms, and
   an amber note when the Next Renewal Date is missing or passed without a
   quote. Summary strip: quoting today, renewal date needs fixing, needs
@@ -798,8 +801,7 @@ existing steps; there is no new table and no second state machine.
   day this is deployed. Live 2026-09-22: 13 deals point at a future date
   (10 of them 1 October), 12 at a date that has passed and 3 at the
   `1970-01-01` placeholder — the last 15 are quoted only after the team
-  sets the date in HubSpot. Down The Rabbit Hole (P7M) is unsupported
-  until its line item is corrected; three deals have no dated line item;
+  sets the date in HubSpot. Three deals have no dated line item;
   every deal's Accountant Email is empty, so nothing is emailed until it is
   filled. No Zoho customer payment is recorded (unchanged): if Zoho's own
   automated payment reminders are on, Zoho will chase paid customers.

@@ -67,8 +67,7 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   placeholder — those 15 are quoted only once the team sets the date in
   HubSpot (the page lists them under "Renewal date needs fixing"). Down The
   Rabbit Hole's
-  `P7M` line item (ends 30 Sep) is unsupported: nothing bills it until
-  the line item is corrected in HubSpot. Rapheal, MD Afreed and SLV Trades
+  `P7M` line item is a normal 7-month cycle (next renewal 1 Apr 2027). Rapheal, MD Afreed and SLV Trades
   have no dated line item and are never billed. Yearly (Sahil, the test
   deal) stays on the legacy due-date flow.
 - Zoho org setting to check before October: no Zoho customer payment is
@@ -127,6 +126,13 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (any term) — Every whole number of months under a year is a
+  billing cycle (P7M = "Every 7 months", quoted for 7 months at the last
+  paid amount); the "unsupported" classification is gone. A year or longer
+  still goes to the legacy due-date flow. On payment a term without a
+  HubSpot frequency word is written as monthly frequency, quantity =
+  months, price = monthly share (how the team enters them). Down The
+  Rabbit Hole (P7M, next renewal 1 Apr 2027) is now a normal cycle.
 - 2026-09-22 (Next Renewal Date) — The quote date now comes from the
   HubSpot deal's **Next Renewal Date** for every cycle (monthly and term);
   the line item's own dates no longer decide anything, only its Term

@@ -47,7 +47,7 @@ function billingView(classification: DealClassification, today: string, jobs: Re
   if (classification.kind !== "cycle") {
     return {
       kind: classification.kind,
-      label: classification.kind === "unsupported" ? "Unsupported" : "Not billed",
+      label: "Not billed",
       months: null,
       due: null,
       reason: classification.reason,

@@ -44,7 +44,7 @@ beforeEach(() => {
     deal("quarterly-stale", "2026-08-10", [item({ billingPeriodTerm: "P3M", price: 21000 })]),
     deal("no-date", null, [item()]),
     deal("yearly", "2026-10-01", [item({ billingPeriodTerm: "P1Y" })]),
-    deal("seven-month", "2026-10-01", [item({ billingPeriodTerm: "P7M" })]),
+    deal("seven-month", "2026-10-01", [item({ billingPeriodTerm: "P7M", quantity: 7, price: 3986 })]),
   ]);
   vi.mocked(runRenewalPipeline).mockResolvedValue({
     billingPeriod: "x",
@@ -80,9 +80,11 @@ describe("generateRenewalQuote (POST /webhooks/renewal)", () => {
     expect(runRenewalPipeline).not.toHaveBeenCalled();
   });
 
-  it("refuses an unsupported term rather than guessing", async () => {
-    await expect(generateRenewalQuote(fakeSupabase, "seven-month", oct1)).rejects.toThrow(/P7M/);
-    expect(runRenewalPipeline).not.toHaveBeenCalled();
+  it("quotes a seven-month client for seven months at what they paid last time", async () => {
+    const outcome = await generateRenewalQuote(fakeSupabase, "seven-month", oct1);
+
+    expect(outcome.kind).toBe("cycle");
+    expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-10-01", months: 7, amount: 27902 });
   });
 
   it("runs the legacy due-date pipeline for a deal no cycle owns (yearly)", async () => {
