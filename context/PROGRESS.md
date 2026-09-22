@@ -131,8 +131,9 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   invoices go to the Accountant Email when it is a valid address, else to
   the contact's email; the admin page column is now "Accountant email" and
   writes to that field (`POST /admin/pricing/accountant-email`). Until the
-  team fills it in, every deal falls back to the contact's email — Leon and
-  Root Botanie have neither and still cannot be emailed.
+  team fills it in, every deal falls back to the contact's email — Leon,
+  Root Botanie and Ayurpet have no contact email either and cannot be
+  emailed until their Accountant Email is entered.
 - 2026-09-22 (admin tweaks) — "Paid through Yes Bank" now opens an inline
   form with the real payment date (+ narration) instead of a prompt, so
   HubSpot's Date Paid is the day the money arrived, not the day the
