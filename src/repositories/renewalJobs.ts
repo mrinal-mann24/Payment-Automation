@@ -440,3 +440,47 @@ export async function markReminderSkipped(
     throw new Error(`Failed to record reminder skip on renewal_jobs: ${error.message}`);
   }
 }
+
+export async function markEstimateEmailSent(supabase: SupabaseClient, jobId: string): Promise<void> {
+  const { error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      estimate_email_sent: true,
+      email_error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+
+  if (error) {
+    throw new Error(`Failed to record quote email on renewal_jobs: ${error.message}`);
+  }
+}
+
+export async function markInvoiceEmailSent(supabase: SupabaseClient, jobId: string): Promise<void> {
+  const { error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      invoice_email_sent: true,
+      email_error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+
+  if (error) {
+    throw new Error(`Failed to record invoice email on renewal_jobs: ${error.message}`);
+  }
+}
+
+export async function markEmailError(supabase: SupabaseClient, jobId: string, message: string): Promise<void> {
+  const { error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      email_error: message,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+
+  if (error) {
+    throw new Error(`Failed to record email error on renewal_jobs: ${error.message}`);
+  }
+}

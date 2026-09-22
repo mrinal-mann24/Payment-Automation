@@ -337,3 +337,27 @@ export async function markInvoiceAsSent(invoiceId: string): Promise<void> {
     method: "POST",
   });
 }
+
+export interface ZohoEmail {
+  to: string;
+  subject: string;
+  body: string;
+}
+
+// Zoho emails the document itself (sender and PDF attachment follow the
+// org's email settings). `body` is the message text — the Razorpay link has
+// to be put there by the caller, Zoho's own templates know nothing about
+// it. Covered by the estimates.CREATE / invoices.CREATE scopes.
+export async function emailEstimate(estimateId: string, email: ZohoEmail): Promise<void> {
+  await zohoFetch(`/estimates/${estimateId}/email?organization_id=${config.zoho.orgId}`, {
+    method: "POST",
+    body: JSON.stringify({ to_mail_ids: [email.to], subject: email.subject, body: email.body }),
+  });
+}
+
+export async function emailInvoice(invoiceId: string, email: ZohoEmail): Promise<void> {
+  await zohoFetch(`/invoices/${invoiceId}/email?organization_id=${config.zoho.orgId}`, {
+    method: "POST",
+    body: JSON.stringify({ to_mail_ids: [email.to], subject: email.subject, body: email.body }),
+  });
+}

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEstimate } from "../clients/zoho.js";
+import { createEstimate, emailEstimate, emailInvoice } from "../clients/zoho.js";
 
 const originalFetch = global.fetch;
 
@@ -79,5 +79,32 @@ describe("createEstimate", () => {
     const lineItem = (captured.body!.line_items as Array<Record<string, unknown>>)[0]!;
     expect(lineItem).toMatchObject({ name: "Service", rate: 5000, quantity: 2 });
     expect(lineItem).not.toHaveProperty("description");
+  });
+});
+
+describe("emailEstimate / emailInvoice", () => {
+  function mockEmailFetch(): { calls: Array<{ path: string; body: Record<string, unknown> }> } {
+    const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const path = String(url);
+      if (path.startsWith("https://accounts.zoho.in/")) {
+        return new Response(JSON.stringify({ access_token: "tok", expires_in: 3600 }), { status: 200 });
+      }
+      calls.push({ path, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      return new Response(JSON.stringify({ code: 0, message: "Your estimate has been sent." }), { status: 200 });
+    }) as unknown as typeof fetch;
+    return { calls };
+  }
+
+  it("posts to Zoho's email endpoints with the recipient, subject and body", async () => {
+    const { calls } = mockEmailFetch();
+
+    await emailEstimate("zest-1", { to: "client@example.com", subject: "Quote QT-1", body: "Hello" });
+    await emailInvoice("zinv-1", { to: "client@example.com", subject: "Invoice INV-1", body: "Thanks" });
+
+    expect(calls[0]!.path).toBe("https://www.zohoapis.in/books/v3/estimates/zest-1/email?organization_id=org-1");
+    expect(calls[0]!.body).toEqual({ to_mail_ids: ["client@example.com"], subject: "Quote QT-1", body: "Hello" });
+    expect(calls[1]!.path).toBe("https://www.zohoapis.in/books/v3/invoices/zinv-1/email?organization_id=org-1");
+    expect(calls[1]!.body).toEqual({ to_mail_ids: ["client@example.com"], subject: "Invoice INV-1", body: "Thanks" });
   });
 });
