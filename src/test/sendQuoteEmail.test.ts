@@ -67,7 +67,7 @@ const fakeDeal = {
   dealName: "Acme <> VA",
   billingPeriod: null,
   contactEmail: "client@example.com",
-  billingEmail: "client@example.com",
+  billingEmails: ["client@example.com"],
   contactName: "Client Name",
   contactPhone: "919876543210",
   lineItems: [{ id: "li-1", name: "Service", quantity: 1, price: 5000 }],
@@ -86,7 +86,7 @@ describe("sendQuoteEmail", () => {
 
     expect(result).toEqual({ sent: true, error: null });
     expect(emailEstimate).toHaveBeenCalledWith("zest-123", {
-      to: "client@example.com",
+      to: ["client@example.com"],
       subject: expect.stringContaining("QT-000123"),
       body: expect.stringMatching(/1 October 2026 to 31 October 2026[\s\S]*https:\/\/rzp\.io\/i\/1/),
     });
@@ -132,7 +132,7 @@ describe("sendQuoteEmail — billing email", () => {
       dealName: "Acme <> VA",
       billingPeriod: null,
       contactEmail: "owner@acme.example",
-      billingEmail: "accounts@acme.example",
+      billingEmails: ["accounts@acme.example", "cfo@acme.example"],
       contactName: "Client Name",
       contactPhone: null,
       lineItems: [],
@@ -140,14 +140,14 @@ describe("sendQuoteEmail — billing email", () => {
 
     await sendQuoteEmail(fakeSupabase, "deal-1", "2026-10");
 
-    expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toBe("accounts@acme.example");
+    expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toEqual(["accounts@acme.example", "cfo@acme.example"]);
   });
 });
 
 describe("sendQuoteEmail — no accountant email", () => {
   it("sends nothing and records why when the deal has no Accountant Email (no fallback to the contact)", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
-    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal, billingEmail: null });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal, billingEmails: [] });
 
     const result = await sendQuoteEmail(fakeSupabase, "deal-1", "2026-10");
 

@@ -99,11 +99,11 @@ describe("emailEstimate / emailInvoice", () => {
   it("posts to Zoho's email endpoints with the recipient, subject and body", async () => {
     const { calls } = mockEmailFetch();
 
-    await emailEstimate("zest-1", { to: "client@example.com", subject: "Quote QT-1", body: "Hello" });
-    await emailInvoice("zinv-1", { to: "client@example.com", subject: "Invoice INV-1", body: "Thanks" });
+    await emailEstimate("zest-1", { to: ["client@example.com", "cfo@example.com"], subject: "Quote QT-1", body: "Hello" });
+    await emailInvoice("zinv-1", { to: ["client@example.com"], subject: "Invoice INV-1", body: "Thanks" });
 
     expect(calls[0]!.path).toBe("https://www.zohoapis.in/books/v3/estimates/zest-1/email?organization_id=org-1");
-    expect(calls[0]!.body).toEqual({ to_mail_ids: ["client@example.com"], subject: "Quote QT-1", body: "Hello" });
+    expect(calls[0]!.body).toEqual({ to_mail_ids: ["client@example.com", "cfo@example.com"], subject: "Quote QT-1", body: "Hello" });
     expect(calls[1]!.path).toBe("https://www.zohoapis.in/books/v3/invoices/zinv-1/email?organization_id=org-1");
     expect(calls[1]!.body).toEqual({ to_mail_ids: ["client@example.com"], subject: "Invoice INV-1", body: "Thanks" });
   });

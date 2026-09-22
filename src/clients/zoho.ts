@@ -349,7 +349,7 @@ export async function markInvoiceAsSent(invoiceId: string): Promise<void> {
 }
 
 export interface ZohoEmail {
-  to: string;
+  to: string[];
   subject: string;
   body: string;
 }
@@ -361,13 +361,13 @@ export interface ZohoEmail {
 export async function emailEstimate(estimateId: string, email: ZohoEmail): Promise<void> {
   await zohoFetch(`/estimates/${estimateId}/email?organization_id=${config.zoho.orgId}`, {
     method: "POST",
-    body: JSON.stringify({ to_mail_ids: [email.to], subject: email.subject, body: email.body }),
+    body: JSON.stringify({ to_mail_ids: email.to, subject: email.subject, body: email.body }),
   });
 }
 
 export async function emailInvoice(invoiceId: string, email: ZohoEmail): Promise<void> {
   await zohoFetch(`/invoices/${invoiceId}/email?organization_id=${config.zoho.orgId}`, {
     method: "POST",
-    body: JSON.stringify({ to_mail_ids: [email.to], subject: email.subject, body: email.body }),
+    body: JSON.stringify({ to_mail_ids: email.to, subject: email.subject, body: email.body }),
   });
 }

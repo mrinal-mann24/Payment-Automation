@@ -39,11 +39,11 @@ export interface HubspotDeal {
   contactEmail: string; // Zoho customer identity: the associated contact, or the Accountant Email when there is no contact
   contactName: string;
   contactPhone: string | null;
-  // Where quotes and invoices are emailed: the deal's Accountant Email
-  // when it is a real address, otherwise null and NO email is sent (there
-  // is deliberately no fallback to the contact). Optional only so test
+  // Where quotes and invoices are emailed: every Accountant Email field
+  // (1–3) that holds a real address. Empty means NO email is sent — there
+  // is deliberately no fallback to the contact. Optional only so test
   // fixtures stay valid; the fetch always sets it.
-  billingEmail?: string | null;
+  billingEmails?: string[];
   lineItems: HubspotLineItem[];
 }
 
@@ -72,6 +72,8 @@ interface HubspotDealResponse {
     billing_cycle?: string;
     next_renewal_date?: string;
     accountant_email?: string | null;
+    accountant_email_2?: string | null;
+    accountant_email_3?: string | null;
     billing_poc_name?: string | null;
   };
   associations?: {
@@ -112,9 +114,27 @@ export function asEmail(value: string | null | undefined): string | null {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
 }
 
+// The deal fields documents are emailed to. HubSpot validates each as a
+// single address, so several recipients need several fields; 2 and 3 are
+// created by the team in HubSpot (the app token lacks the schema scope).
+export const ACCOUNTANT_EMAIL_PROPERTIES = ["accountant_email", "accountant_email_2", "accountant_email_3"] as const;
+type AccountantEmailProperty = (typeof ACCOUNTANT_EMAIL_PROPERTIES)[number];
+
+// The valid, de-duplicated addresses across the Accountant Email fields.
+function accountantEmails(properties: Partial<Record<AccountantEmailProperty, string | null>>): string[] {
+  const emails: string[] = [];
+  for (const name of ACCOUNTANT_EMAIL_PROPERTIES) {
+    const email = asEmail(properties[name]);
+    if (email && !emails.includes(email)) {
+      emails.push(email);
+    }
+  }
+  return emails;
+}
+
 export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<HubspotDeal> {
   const deal = (await hubspotFetch(
-    `/crm/v3/objects/deals/${dealId}?properties=dealname,billing_cycle,next_renewal_date,accountant_email,billing_poc_name&associations=line_items,contacts`,
+    `/crm/v3/objects/deals/${dealId}?properties=dealname,billing_cycle,next_renewal_date,${ACCOUNTANT_EMAIL_PROPERTIES.join(",")},billing_poc_name&associations=line_items,contacts`,
   )) as HubspotDealResponse;
 
   const lineItemIds = deal.associations?.["line items"]?.results.map((r) => r.id) ?? [];
@@ -135,12 +155,12 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
       : Promise.resolve(null),
   ]);
 
-  // The associated contact is the Zoho customer identity; the deal's
-  // Accountant Email is the only address documents are emailed to. A deal
-  // with no contact can still be billed when the Accountant Email is set.
+  // The associated contact is the Zoho customer identity; the Accountant
+  // Email fields are the only addresses documents are emailed to. A deal
+  // with no contact can still be billed when an Accountant Email is set.
   const contactEmail = asEmail(contact?.properties.email);
-  const accountantEmail = asEmail(deal.properties.accountant_email);
-  const identityEmail = contactEmail ?? accountantEmail;
+  const billingEmails = accountantEmails(deal.properties);
+  const identityEmail = contactEmail ?? billingEmails[0] ?? null;
   if (!identityEmail) {
     throw new Error(`HubSpot deal ${dealId} has no associated contact email and no valid Accountant Email`);
   }
@@ -162,7 +182,7 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
     contactEmail: identityEmail,
     contactName,
     contactPhone: contact?.properties.phone ?? null,
-    billingEmail: accountantEmail,
+    billingEmails,
     lineItems: lineItems.map((item) => parseLineItem(dealId, item)),
   };
 }
@@ -424,33 +444,35 @@ export async function addLineItemToDeal(
   });
 }
 
-// Admin page: set (or clear, with null) the deal's Accountant Email — the
-// address quotes and invoices are emailed to.
-export async function updateDealAccountantEmail(dealId: string, email: string | null): Promise<void> {
+// Admin page: set (or clear, with null) the deal's three Accountant Email
+// fields — the addresses quotes and invoices are emailed to.
+export async function updateDealAccountantEmails(dealId: string, emails: Array<string | null>): Promise<void> {
   await hubspotFetch(`/crm/v3/objects/deals/${dealId}`, {
     method: "PATCH",
-    body: JSON.stringify({ properties: { accountant_email: email ?? "" } }),
+    body: JSON.stringify({
+      properties: Object.fromEntries(ACCOUNTANT_EMAIL_PROPERTIES.map((name, i) => [name, emails[i] ?? ""])),
+    }),
   });
 }
 
 export interface DealEmails {
-  accountantEmail: string | null; // raw HubSpot value, junk included, so the page can show what is there
+  accountantEmails: Array<string | null>; // raw HubSpot values (fields 1–3), junk included, so the page can show what is there
 }
 
-// Admin page: every deal's Accountant Email in one batch call.
+// Admin page: every deal's Accountant Email fields in one batch call.
 export async function fetchVaDealEmails(dealIds: string[]): Promise<Map<string, DealEmails>> {
-  const emails = new Map<string, DealEmails>(dealIds.map((id) => [id, { accountantEmail: null }]));
+  const emails = new Map<string, DealEmails>(dealIds.map((id) => [id, { accountantEmails: [null, null, null] }]));
   if (dealIds.length === 0) {
     return emails;
   }
 
   const deals = (await hubspotFetch("/crm/v3/objects/deals/batch/read", {
     method: "POST",
-    body: JSON.stringify({ inputs: dealIds.map((id) => ({ id })), properties: ["accountant_email"] }),
-  })) as { results: Array<{ id: string; properties: { accountant_email?: string | null } }> };
+    body: JSON.stringify({ inputs: dealIds.map((id) => ({ id })), properties: [...ACCOUNTANT_EMAIL_PROPERTIES] }),
+  })) as { results: Array<{ id: string; properties: Partial<Record<AccountantEmailProperty, string | null>> }> };
   for (const deal of deals.results) {
     const entry = emails.get(deal.id);
-    if (entry) entry.accountantEmail = deal.properties.accountant_email?.trim() || null;
+    if (entry) entry.accountantEmails = ACCOUNTANT_EMAIL_PROPERTIES.map((name) => deal.properties[name]?.trim() || null);
   }
 
   return emails;

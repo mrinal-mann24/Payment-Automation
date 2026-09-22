@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchDealWithLineItemsAndContact,
   fetchVaDealEmails,
-  updateDealAccountantEmail,
+  updateDealAccountantEmails,
 } from "../clients/hubspot.js";
 
 const originalFetch = global.fetch;
@@ -21,12 +21,13 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 // A deal with (optionally) one associated contact and no line items.
 function mockDealFetch(opts: {
-  accountantEmail?: string | null;
+  accountantEmails?: Array<string | null>;
   pocEmail?: string | null;
   pocName?: string | null;
   contact: { email?: string; phone?: string } | null;
 }) {
   const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+  const [e1 = null, e2 = null, e3 = null] = opts.accountantEmails ?? [];
   global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const path = String(url);
     calls.push({ path, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined });
@@ -37,7 +38,9 @@ function mockDealFetch(opts: {
           dealname: "Acme <> VA",
           billing_cycle: "Monthly",
           next_renewal_date: "2026-10-01",
-          accountant_email: opts.accountantEmail ?? null,
+          accountant_email: e1,
+          accountant_email_2: e2,
+          accountant_email_3: e3,
           billing_poc_email: opts.pocEmail ?? null,
           billing_poc_name: opts.pocName ?? null,
         },
@@ -55,63 +58,65 @@ function mockDealFetch(opts: {
   return calls;
 }
 
-describe("fetchDealWithLineItemsAndContact — billing email", () => {
-  it("emails go to the deal's Accountant Email when it is a real address; the contact stays the Zoho identity", async () => {
-    mockDealFetch({ accountantEmail: "accounts@acme.example", contact: { email: "owner@acme.example", phone: "9876543210" } });
+describe("fetchDealWithLineItemsAndContact — billing emails", () => {
+  it("collects every Accountant Email field that holds a real address; the contact stays the Zoho identity", async () => {
+    mockDealFetch({
+      accountantEmails: ["accounts@acme.example", "cfo@acme.example", "NA"],
+      contact: { email: "owner@acme.example", phone: "9876543210" },
+    });
 
     const deal = await fetchDealWithLineItemsAndContact("deal-1");
 
-    expect(deal.billingEmail).toBe("accounts@acme.example");
+    expect(deal.billingEmails).toEqual(["accounts@acme.example", "cfo@acme.example"]);
     expect(deal.contactEmail).toBe("owner@acme.example");
     expect(deal.contactName).toBe("Client Name");
   });
 
-  it("has no billing email at all when the Accountant Email is blank or junk — never the contact's, never the POC's", async () => {
-    for (const junk of [null, "", "NA", "--", "98911 46116"]) {
-      mockDealFetch({ accountantEmail: junk, pocEmail: "poc@acme.example", contact: { email: "owner@acme.example" } });
+  it("drops duplicates and junk, and has no billing email at all when none of the three is an address", async () => {
+    mockDealFetch({ accountantEmails: ["accounts@acme.example", " accounts@acme.example ", null], contact: { email: "owner@acme.example" } });
+    expect((await fetchDealWithLineItemsAndContact("deal-1")).billingEmails).toEqual(["accounts@acme.example"]);
 
-      const deal = await fetchDealWithLineItemsAndContact("deal-1");
-
-      expect(deal.billingEmail).toBeNull();
-      expect(deal.contactEmail).toBe("owner@acme.example");
+    for (const junk of [[], [null, null, null], ["", "NA", "--"], ["98911 46116"]]) {
+      mockDealFetch({ accountantEmails: junk, pocEmail: "poc@acme.example", contact: { email: "owner@acme.example" } });
+      expect((await fetchDealWithLineItemsAndContact("deal-1")).billingEmails).toEqual([]);
     }
   });
 
-  it("uses the Accountant Email as the Zoho identity when the deal has no associated contact", async () => {
-    mockDealFetch({ accountantEmail: "accounts@acme.example", pocName: "Ayurpet", contact: null });
+  it("uses the first Accountant Email as the Zoho identity when the deal has no associated contact", async () => {
+    mockDealFetch({ accountantEmails: [null, "cfo@acme.example"], pocName: "Ayurpet", contact: null });
 
     const deal = await fetchDealWithLineItemsAndContact("deal-1");
 
-    expect(deal.contactEmail).toBe("accounts@acme.example");
-    expect(deal.billingEmail).toBe("accounts@acme.example");
+    expect(deal.contactEmail).toBe("cfo@acme.example");
+    expect(deal.billingEmails).toEqual(["cfo@acme.example"]);
     expect(deal.contactName).toBe("Ayurpet");
     expect(deal.contactPhone).toBeNull();
   });
 
   it("still refuses a deal with no contact email and no valid Accountant Email", async () => {
-    mockDealFetch({ accountantEmail: "NA", pocEmail: "poc@acme.example", contact: null });
+    mockDealFetch({ accountantEmails: ["NA"], pocEmail: "poc@acme.example", contact: null });
 
     await expect(fetchDealWithLineItemsAndContact("deal-1")).rejects.toThrow(/no associated contact email and no valid Accountant Email/);
   });
 });
 
-describe("updateDealAccountantEmail", () => {
-  it("PATCHes the deal's accountant_email, and clears it with an empty string", async () => {
+describe("updateDealAccountantEmails", () => {
+  it("PATCHes all three Accountant Email fields, clearing the blank ones with an empty string", async () => {
     const calls = mockDealFetch({ contact: null });
 
-    await updateDealAccountantEmail("deal-1", "accounts@acme.example");
-    await updateDealAccountantEmail("deal-1", null);
+    await updateDealAccountantEmails("deal-1", ["accounts@acme.example", null, "cfo@acme.example"]);
+    await updateDealAccountantEmails("deal-1", [null, null, null]);
 
     const patches = calls.filter((c) => c.method === "PATCH");
     expect(patches.map((c) => c.body)).toEqual([
-      { properties: { accountant_email: "accounts@acme.example" } },
-      { properties: { accountant_email: "" } },
+      { properties: { accountant_email: "accounts@acme.example", accountant_email_2: "", accountant_email_3: "cfo@acme.example" } },
+      { properties: { accountant_email: "", accountant_email_2: "", accountant_email_3: "" } },
     ]);
   });
 });
 
 describe("fetchVaDealEmails", () => {
-  it("reads every deal's Accountant Email in one batch call; a deal missing from the result is left blank", async () => {
+  it("reads every deal's three Accountant Email fields in one batch call; a deal missing from the result is left blank", async () => {
     const calls: string[] = [];
     let requestedProperties: string[] = [];
     global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -123,7 +128,10 @@ describe("fetchVaDealEmails", () => {
         return jsonResponse({
           results: body.inputs.filter(({ id }) => id !== "d3").map(({ id }) => ({
             id,
-            properties: { accountant_email: id === "d1" ? "accounts@one.example" : "NA" },
+            properties:
+              id === "d1"
+                ? { accountant_email: "accounts@one.example", accountant_email_2: "cfo@one.example", accountant_email_3: null }
+                : { accountant_email: "NA", accountant_email_2: "", accountant_email_3: null },
           })),
         });
       }
@@ -133,10 +141,10 @@ describe("fetchVaDealEmails", () => {
     const emails = await fetchVaDealEmails(["d1", "d2", "d3"]);
 
     expect(calls).toHaveLength(1);
-    expect(requestedProperties).toEqual(["accountant_email"]);
-    expect(emails.get("d1")).toEqual({ accountantEmail: "accounts@one.example" });
-    expect(emails.get("d2")).toEqual({ accountantEmail: "NA" });
-    expect(emails.get("d3")).toEqual({ accountantEmail: null });
+    expect(requestedProperties).toEqual(["accountant_email", "accountant_email_2", "accountant_email_3"]);
+    expect(emails.get("d1")).toEqual({ accountantEmails: ["accounts@one.example", "cfo@one.example", null] });
+    expect(emails.get("d2")).toEqual({ accountantEmails: ["NA", null, null] });
+    expect(emails.get("d3")).toEqual({ accountantEmails: [null, null, null] });
   });
 
   it("makes no call for an empty deal list", async () => {

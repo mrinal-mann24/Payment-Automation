@@ -117,13 +117,13 @@ export async function createAdditionCharge(
 
   let emailSent = false;
   let emailError: string | null = null;
-  if (!deal.billingEmail) {
+  if (!deal.billingEmails?.length) {
     // No Accountant Email on the deal: nothing is emailed, by design.
     emailError = "no Accountant Email on the HubSpot deal";
     await markAdditionEmailError(supabase, row.id, `quote email: ${emailError}`);
   } else try {
     await emailEstimate(estimateId, {
-      to: deal.billingEmail,
+      to: deal.billingEmails,
       subject: `Quote ${estimateNumber} — ${service}`,
       body: [
         `Dear ${deal.contactName || "Client"},`,

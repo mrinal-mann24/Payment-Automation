@@ -46,7 +46,7 @@ const deal = {
   dealName: "Acme <> VA",
   billingPeriod: null,
   contactEmail: "client@example.com",
-  billingEmail: "client@example.com",
+  billingEmails: ["client@example.com"],
   contactName: "Client Name",
   contactPhone: "9876543210",
   lineItems: [{ id: "li-1", name: "VA Monthly", quantity: 1, price: 5000 }],
@@ -112,7 +112,7 @@ describe("createAdditionCharge (one-time quote)", () => {
     expect(markAdditionPeriskopeSent).toHaveBeenCalledWith(fakeSupabase, row.id);
 
     expect(emailEstimate).toHaveBeenCalledWith("zest-ot", {
-      to: "client@example.com",
+      to: ["client@example.com"],
       subject: "Quote QT-OT — Site visit",
       body: expect.stringContaining("https://rzp.io/i/ot"),
     });
@@ -198,18 +198,18 @@ describe("createAdditionCharge (one-time quote)", () => {
 
 describe("createAdditionCharge — billing email", () => {
   it("emails the one-time quote to the billing email, while the Zoho customer stays keyed by the contact identity", async () => {
-    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...deal, billingEmail: "accounts@acme.example" });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...deal, billingEmails: ["accounts@acme.example", "cfo@acme.example"] });
 
     await createAdditionCharge(fakeSupabase, "deal-1", 2500, "Site visit", null);
 
     expect(findOrCreateCustomer).toHaveBeenCalledWith("client@example.com", "Client Name");
-    expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toBe("accounts@acme.example");
+    expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toEqual(["accounts@acme.example", "cfo@acme.example"]);
   });
 });
 
 describe("createAdditionCharge — no accountant email", () => {
   it("still sends the quote on WhatsApp but skips the email with a recorded reason", async () => {
-    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...deal, billingEmail: null });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...deal, billingEmails: [] });
 
     const result = await createAdditionCharge(fakeSupabase, "deal-1", 2500, "Site visit", null);
 

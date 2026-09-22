@@ -160,7 +160,7 @@ export const pricingAdminHtml = `<!doctype html>
     <div class="card-head">
       <h2>Clients</h2>
       <span class="count" id="deals-count"></span>
-      <p>How each client is billed: the cycle length from the latest HubSpot line item's term, the quote date from the deal's <strong>Next Renewal Date</strong>. Quotes go out automatically at 11:00 IST on that date, and the date moves forward by one cycle when the client pays. Quotes and invoices are emailed <strong>only</strong> to the <strong>Accountant email</strong> (HubSpot's Accountant Email field; saving writes it back to HubSpot). With no accountant email, nothing is emailed and the client gets WhatsApp only.</p>
+      <p>How each client is billed: the cycle length from the latest HubSpot line item's term, the quote date from the deal's <strong>Next Renewal Date</strong>. Quotes go out automatically at 11:00 IST on that date, and the date moves forward by one cycle when the client pays. Quotes and invoices are emailed <strong>only</strong> to the <strong>Accountant emails</strong> (up to three, HubSpot's Accountant Email 1–3 fields; saving writes them back to HubSpot). With none set, nothing is emailed and the client gets WhatsApp only.</p>
     </div>
     <div class="table-wrap">
       <table>
@@ -169,7 +169,7 @@ export const pricingAdminHtml = `<!doctype html>
             <th style="min-width:200px">Deal</th>
             <th style="width:130px">Stage</th>
             <th style="min-width:250px">Billing</th>
-            <th style="width:260px">Accountant email</th>
+            <th style="width:270px">Accountant emails</th>
             <th style="width:230px">Base price / month</th>
             <th style="min-width:460px">One-time quote</th>
           </tr>
@@ -337,7 +337,7 @@ function renderStats(data) {
     } else {
       attention++;
     }
-    if (!d.email.accountantValid) noEmail++;
+    if (!d.email.sendsTo.length) noEmail++;
   }
   const cycles = deals.flatMap((d) => d.cycles);
   const unpaid = cycles.filter((c) => c.status !== 'paid').length;
@@ -391,34 +391,40 @@ function billingCell(deal) {
 function emailCell(deal) {
   const td = document.createElement('td');
   const e = deal.email;
-  const row = el('div', 'field-row');
-  const input = document.createElement('input');
-  input.type = 'email';
-  input.className = 'mono';
-  input.value = e.accountantEmail ?? '';
-  input.placeholder = 'not set — no email is sent';
+  const inputs = [0, 1, 2].map((i) => {
+    const input = document.createElement('input');
+    input.type = 'email';
+    input.className = 'mono';
+    input.value = e.accountantEmails[i] ?? '';
+    input.placeholder = i === 0 ? 'Accountant email' : 'Email ' + (i + 1) + ' (optional)';
+    input.style.marginBottom = '0.3rem';
+    td.appendChild(input);
+    return input;
+  });
+  const row = el('div', 'row-actions');
   const saveBtn = el('button', 'btn secondary small', 'Save');
   saveBtn.type = 'button';
   saveBtn.onclick = async () => {
-    const email = input.value.trim();
+    const emails = inputs.map((input) => input.value.trim());
     const done = busy(saveBtn, 'Saving');
     try {
-      await postJson('/admin/pricing/accountant-email', { dealId: deal.dealId, email });
-      toast('ok', deal.dealName + ': accountant email ' + (email ? 'saved to HubSpot' : 'cleared — no email will be sent'));
+      await postJson('/admin/pricing/accountant-email', { dealId: deal.dealId, emails });
+      const count = emails.filter(Boolean).length;
+      toast('ok', deal.dealName + ': ' + (count ? count + (count === 1 ? ' accountant email' : ' accountant emails') + ' saved to HubSpot' : 'accountant emails cleared — no email will be sent'));
       await loadDeals();
     } catch (err) {
       toast('err', deal.dealName + ': ' + err.message, true);
       done();
     }
   };
-  row.appendChild(input);
   row.appendChild(saveBtn);
   td.appendChild(row);
-  if (e.accountantValid) {
-    td.appendChild(el('div', 'sub', 'Quotes and invoices are emailed here'));
+  if (e.sendsTo.length) {
+    td.appendChild(el('div', 'sub', 'Quotes and invoices are emailed to ' + e.sendsTo.length + (e.sendsTo.length === 1 ? ' address' : ' addresses')));
   } else {
-    td.appendChild(el('div', 'sub warn', (e.accountantEmail ? 'Not a valid email — ignored. ' : '') + 'No email is sent for this client — WhatsApp only'));
+    td.appendChild(el('div', 'sub warn', 'No email is sent for this client — WhatsApp only'));
   }
+  if (e.invalid.length) td.appendChild(el('div', 'sub warn', 'Ignored (not an email): ' + e.invalid.join(', ')));
   return td;
 }
 

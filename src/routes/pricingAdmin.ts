@@ -1,7 +1,13 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { getSupabaseClient } from "../clients/supabase.js";
-import { asEmail, fetchVaDealEmails, fetchVaDealsWithLineItems, updateDealAccountantEmail, type DealEmails } from "../clients/hubspot.js";
+import {
+  asEmail,
+  fetchVaDealEmails,
+  fetchVaDealsWithLineItems,
+  updateDealAccountantEmails,
+  type DealEmails,
+} from "../clients/hubspot.js";
 import { listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
 import { upsertClientPricing } from "../repositories/clientPricing.js";
 import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
@@ -70,6 +76,15 @@ function billingView(classification: DealClassification, today: string, jobs: Re
   };
 }
 
+// Where this deal's quotes and invoices are emailed: every Accountant
+// Email field (1–3) that is a real address, otherwise nowhere.
+function emailView(emails: DealEmails | undefined) {
+  const accountantEmails = emails?.accountantEmails ?? [null, null, null];
+  const sendsTo = [...new Set(accountantEmails.map((e) => asEmail(e)).filter((e): e is string => e !== null))];
+  const invalid = accountantEmails.filter((e): e is string => Boolean(e) && asEmail(e) === null);
+  return { accountantEmails, sendsTo, invalid };
+}
+
 // One-time quotes: PAID once the Razorpay webhook has converted the invoice.
 function additionView(charge: AdditionCharge, dealNames: Map<string, string>) {
   const errorLog = charge.error_log as { step?: string; message?: string } | null;
@@ -99,18 +114,6 @@ function additionView(charge: AdditionCharge, dealNames: Map<string, string>) {
     emailError: charge.email_error,
     issue: errorLog?.message ?? null,
     createdAt: charge.created_at,
-  };
-}
-
-// Where this deal's quotes and invoices are emailed: the Accountant Email
-// when it is a real address, otherwise nowhere (no email is sent).
-function emailView(emails: DealEmails | undefined) {
-  const accountantEmail = emails?.accountantEmail ?? null;
-  const accountantValid = asEmail(accountantEmail) !== null;
-  return {
-    accountantEmail,
-    accountantValid,
-    sendsTo: accountantValid ? accountantEmail : null,
   };
 }
 
@@ -182,32 +185,34 @@ pricingAdminRouter.post("/admin/pricing/base-price", async (req: Request, res: R
   }
 });
 
-// Accountant Email lives on the HubSpot deal; the page edits it in place.
-// Blank clears it (quotes then go to the contact's email again).
-const accountantEmailSchema = z.object({
+// The three Accountant Email fields live on the HubSpot deal; the page
+// edits them in place. A blank field clears it; with all three blank no
+// email is sent.
+const accountantEmailsSchema = z.object({
   dealId: z.string().min(1),
-  email: z.string().trim().max(200),
+  emails: z.array(z.string().trim().max(200)).length(3),
 });
 
 pricingAdminRouter.post("/admin/pricing/accountant-email", async (req: Request, res: Response) => {
-  const parsed = accountantEmailSchema.safeParse(req.body);
+  const parsed = accountantEmailsSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
     return;
   }
-  const email = parsed.data.email === "" ? null : asEmail(parsed.data.email);
-  if (parsed.data.email !== "" && email === null) {
-    res.status(400).json({ error: "That is not a valid email address" });
+  const invalid = parsed.data.emails.filter((email) => email !== "" && asEmail(email) === null);
+  if (invalid.length) {
+    res.status(400).json({ error: `Not a valid email address: ${invalid.join(", ")}` });
     return;
   }
+  const emails = parsed.data.emails.map((email) => (email === "" ? null : asEmail(email)));
 
   try {
-    await updateDealAccountantEmail(parsed.data.dealId, email);
-    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> accountant email ${email ? "updated" : "cleared"}`);
-    res.status(200).json({ ok: true, email });
+    await updateDealAccountantEmails(parsed.data.dealId, emails);
+    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> accountant emails updated (${emails.filter(Boolean).length} set)`);
+    res.status(200).json({ ok: true, emails });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    res.status(502).json({ error: "Failed to update the accountant email in HubSpot", details: message });
+    res.status(502).json({ error: "Failed to update the accountant emails in HubSpot", details: message });
   }
 });
 
@@ -244,8 +249,8 @@ pricingAdminRouter.post("/admin/pricing/send-addition", async (req: Request, res
 });
 
 // Manual payments — "Paid through Yes Bank" is this with method yes_bank and
-// the defaults (quote total, today IST). Razorpay payments only ever come in
-// through the webhook, never through here.
+// the date + narration entered; "Record manual payment" adds amount, method
+// and reference. Razorpay payments only ever come in through the webhook.
 const recordPaymentSchema = z.object({
   jobId: z.string().min(1),
   method: z.enum(["yes_bank", "upi", "neft", "cheque", "cash", "other"]),

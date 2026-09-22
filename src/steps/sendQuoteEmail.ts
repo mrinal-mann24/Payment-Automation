@@ -39,7 +39,7 @@ export async function sendQuoteEmail(
 
   try {
     const deal = await fetchDealWithLineItemsAndContact(dealId);
-    if (!deal.billingEmail) {
+    if (!deal.billingEmails?.length) {
       // No Accountant Email on the deal: nothing is emailed, by design.
       await markEmailError(supabase, job.id, `quote email: no Accountant Email on the HubSpot deal`);
       return { sent: false, error: "no Accountant Email on the HubSpot deal" };
@@ -47,7 +47,7 @@ export async function sendQuoteEmail(
     const period = job.service_period_start ? servicePeriodFrom(job.service_period_start, job.term_months ?? 1).narration : null;
 
     await emailEstimate(job.zoho_estimate_id, {
-      to: deal.billingEmail,
+      to: deal.billingEmails,
       subject: `Virtual Accounting quote ${job.zoho_estimate_number}`,
       body: [
         `Dear ${deal.contactName || "Client"},`,

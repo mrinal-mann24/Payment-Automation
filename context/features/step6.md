@@ -26,8 +26,9 @@ unchanged for yearly customers and deals with no usable line item.
   paid.
 - **Delivery:** quote and invoice go to the client's WhatsApp **group**
   (`clients.whatsapp_group_id`, contact phone as fallback) and by email
-  through Zoho Books' own email API to the deal's **Accountant Email** —
-  only when it is set; no fallback to the contact.
+  through Zoho Books' own email API to every address in the deal's
+  **Accountant Email 1–3** fields — only when at least one is set; no
+  fallback to the contact.
 - **Manual payments:** "Paid through Yes Bank" (date + narration) and
   "Record manual payment" (amount, date, method, narration, reference)
   both mark the cycle PAID and settle it exactly like a Razorpay payment;

@@ -126,6 +126,16 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-22 (three accountant emails) — HubSpot validates
+  `accountant_email` as a single address (a comma-separated pair is
+  rejected with INVALID_EMAIL), so multiple recipients use three fields:
+  `accountant_email`, `accountant_email_2`, `accountant_email_3`. The deal
+  fetch collects every valid, distinct one (`billingEmails`), Zoho's
+  `to_mail_ids` gets the whole list, and the admin page shows three boxes
+  per client saved together. **Fields 2 and 3 must be created in HubSpot
+  by the team** (deal properties, single-line text, internal names exactly
+  as above) — the app token has no schema scope (403 on create). Until
+  then saving from the page fails with HubSpot's error; reading works.
 - 2026-09-22 (any term) — Every whole number of months under a year is a
   billing cycle (P7M = "Every 7 months", quoted for 7 months at the last
   paid amount); the "unsupported" classification is gone. A year or longer

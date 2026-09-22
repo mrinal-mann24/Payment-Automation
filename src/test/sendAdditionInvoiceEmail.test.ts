@@ -54,7 +54,7 @@ beforeEach(() => {
     dealName: "Acme <> VA",
     billingPeriod: null,
     contactEmail: "client@example.com",
-    billingEmail: "client@example.com",
+    billingEmails: ["client@example.com"],
     contactName: "Client Name",
     contactPhone: null,
     lineItems: [],
@@ -66,7 +66,7 @@ describe("sendAdditionInvoiceEmail", () => {
     const result = await sendAdditionInvoiceEmail(fakeSupabase, "QT-OT");
 
     expect(emailInvoice).toHaveBeenCalledWith("zinv-ot", {
-      to: "client@example.com",
+      to: ["client@example.com"],
       subject: "Payment received — invoice INV-OT",
       body: expect.stringContaining("Site visit"),
     });
@@ -101,7 +101,7 @@ describe("sendAdditionInvoiceEmail — billing email", () => {
       dealName: "Acme <> VA",
       billingPeriod: null,
       contactEmail: "owner@acme.example",
-      billingEmail: "accounts@acme.example",
+      billingEmails: ["accounts@acme.example", "cfo@acme.example"],
       contactName: "Client Name",
       contactPhone: null,
       lineItems: [],
@@ -109,7 +109,7 @@ describe("sendAdditionInvoiceEmail — billing email", () => {
 
     await sendAdditionInvoiceEmail(fakeSupabase, "QT-OT");
 
-    expect(vi.mocked(emailInvoice).mock.calls[0]![1].to).toBe("accounts@acme.example");
+    expect(vi.mocked(emailInvoice).mock.calls[0]![1].to).toEqual(["accounts@acme.example", "cfo@acme.example"]);
   });
 });
 
@@ -120,7 +120,7 @@ describe("sendAdditionInvoiceEmail — no accountant email", () => {
       dealName: "Acme <> VA",
       billingPeriod: null,
       contactEmail: "owner@acme.example",
-      billingEmail: null,
+      billingEmails: [],
       contactName: "Client Name",
       contactPhone: null,
       lineItems: [],
