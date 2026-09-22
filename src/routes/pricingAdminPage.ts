@@ -267,7 +267,7 @@ async function postJson(url, body) {
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  if (!res.ok) throw new Error((data.error || 'Request failed') + (data.details ? ': ' + data.details : ''));
   return data;
 }
 
