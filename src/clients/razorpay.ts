@@ -76,6 +76,44 @@ function isReferenceIdExistsError(body: unknown): boolean {
   return description.toLowerCase().includes("reference_id") && description.toLowerCase().includes("already exists");
 }
 
+export interface RazorpayPaymentLinkDetails {
+  id: string;
+  status: string; // created | partially_paid | paid | cancelled | expired
+  short_url: string;
+}
+
+export async function fetchPaymentLink(paymentLinkId: string): Promise<RazorpayPaymentLinkDetails> {
+  const { status, body } = await razorpayFetch(`/payment_links/${paymentLinkId}`);
+
+  if (status < 200 || status >= 300) {
+    throw new Error(`Razorpay API error ${status}: ${JSON.stringify(body)}`);
+  }
+
+  return body as RazorpayPaymentLinkDetails;
+}
+
+export type CancelPaymentLinkOutcome = "cancelled" | "already_cancelled" | "already_paid";
+
+// Used when a cycle is settled outside Razorpay (bank transfer) so the
+// client cannot also pay the link. Razorpay refuses to cancel a link that
+// is no longer open; the link's current status says why.
+export async function cancelPaymentLink(paymentLinkId: string): Promise<CancelPaymentLinkOutcome> {
+  const { status, body } = await razorpayFetch(`/payment_links/${paymentLinkId}/cancel`, { method: "POST" });
+
+  if (status >= 200 && status < 300) {
+    return "cancelled";
+  }
+
+  const link = await fetchPaymentLink(paymentLinkId);
+  if (link.status === "paid") {
+    return "already_paid";
+  }
+  if (link.status === "cancelled" || link.status === "expired") {
+    return "already_cancelled";
+  }
+  throw new Error(`Razorpay API error ${status}: ${JSON.stringify(body)}`);
+}
+
 async function fetchPaymentLinkByReferenceId(
   referenceId: string,
 ): Promise<{ paymentLinkId: string; shortUrl: string }> {

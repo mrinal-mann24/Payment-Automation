@@ -4,6 +4,7 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { classifyVaDeals, runMonthlyBillingCheck, type ClassifiedVaDeals } from "./jobs/monthlyBillingCron.js";
 import { runRenewalCheck } from "./jobs/renewalCron.js";
+import { runSettlementSweep } from "./jobs/settlementSweep.js";
 import { runOverdueReminderCheck } from "./jobs/reminderCron.js";
 
 const app = createApp();
@@ -37,6 +38,10 @@ cron.schedule("0 11 * * *", async () => {
       console.error("[renewalCron] run failed:", err);
     });
   }
+
+  await runSettlementSweep().catch((err) => {
+    console.error("[settlementSweep] run failed:", err);
+  });
 
   // Reminders disabled for now — do not send to clients until re-enabled.
   // await runOverdueReminderCheck().catch((err) => {

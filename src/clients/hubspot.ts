@@ -322,6 +322,51 @@ export async function fetchVaDealsWithLineItems(): Promise<VaDealWithLineItems[]
 // HubSpot's default association type ID for "line item to deal".
 const LINE_ITEM_TO_DEAL_ASSOCIATION_TYPE_ID = 20;
 
+export interface RenewalLineItemInput {
+  name: string;
+  price: number;
+  productId: string | null;
+  billingStartDate: string; // YYYY-MM-DD, first day of the paid month
+  datePaid: string; // YYYY-MM-DD
+}
+
+// One complete "Renewal" line item per paid monthly cycle — the same shape
+// the team enters by hand (monthly, P1M, start = period start, Date Paid).
+// HubSpot then calculates billing_term_end_date (the 1st of the next
+// month), which is what the Neon mirror's due_on reflects. Returns the new
+// line item's id.
+export async function createRenewalLineItem(dealId: string, input: RenewalLineItemInput): Promise<string> {
+  const created = (await hubspotFetch(`/crm/v3/objects/line_items`, {
+    method: "POST",
+    body: JSON.stringify({
+      properties: {
+        name: input.name,
+        quantity: "1",
+        price: String(input.price),
+        recurringbillingfrequency: "monthly",
+        hs_recurring_billing_period: "P1M",
+        hs_recurring_billing_start_date: input.billingStartDate,
+        date_renewed: input.datePaid,
+        recurring_revenue_type: "Renewal",
+        ...(input.productId ? { hs_product_id: input.productId } : {}),
+      },
+      associations: [
+        {
+          to: { id: dealId },
+          types: [
+            {
+              associationCategory: "HUBSPOT_DEFINED",
+              associationTypeId: LINE_ITEM_TO_DEAL_ASSOCIATION_TYPE_ID,
+            },
+          ],
+        },
+      ],
+    }),
+  })) as { id: string };
+
+  return created.id;
+}
+
 export async function addLineItemToDeal(
   dealId: string,
   lineItem: { name: string; quantity: number; price: number },

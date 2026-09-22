@@ -69,13 +69,30 @@ beforeEach(() => {
 });
 
 describe("convertZohoInvoice", () => {
-  it("refuses to run when razorpay_step_status is not done", async () => {
-    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, razorpay_step_status: "pending" });
+  it("converts even when the payment-link step never completed, as long as the estimate exists (bank payments)", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, razorpay_step_status: "failed" });
+    vi.mocked(convertEstimateToInvoice).mockResolvedValue({ invoiceId: "zinv-new", invoiceNumber: "INV-000124" });
 
-    await expect(convertZohoInvoice(fakeSupabase, "deal-1", "2026-07")).rejects.toThrow(
-      /razorpay_step_status is not "done"/,
-    );
+    await convertZohoInvoice(fakeSupabase, "deal-1", "2026-07");
+
+    expect(convertEstimateToInvoice).toHaveBeenCalledWith("zest-123");
+  });
+
+  it("refuses to run when the job has no estimate", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, zoho_estimate_id: null });
+
+    await expect(convertZohoInvoice(fakeSupabase, "deal-1", "2026-07")).rejects.toThrow(/missing zoho_estimate_id/);
     expect(convertEstimateToInvoice).not.toHaveBeenCalled();
+  });
+
+  it("reclaims a step left failed by an earlier attempt instead of refusing forever", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, invoice_step_status: "failed" });
+    vi.mocked(convertEstimateToInvoice).mockResolvedValue({ invoiceId: "zinv-new", invoiceNumber: "INV-000124" });
+
+    await convertZohoInvoice(fakeSupabase, "deal-1", "2026-07");
+
+    expect(claimInvoiceStep).toHaveBeenCalledWith(fakeSupabase, "job-1");
+    expect(convertEstimateToInvoice).toHaveBeenCalledWith("zest-123");
   });
 
   it("skips conversion and reuses the stored invoice when already done (REQ-4.5)", async () => {

@@ -14,9 +14,10 @@ export interface ConvertZohoInvoiceResult {
 
 // Razorpay redelivers webhooks, so two payment_link.paid deliveries for the
 // same job can arrive close together. Zoho's estimate->invoice conversion
-// endpoint is not idempotent (see ARCHITECTURE.md), so this polls briefly
-// for the winner of claimInvoiceStep to finish instead of racing it.
-const CLAIM_WAIT_ATTEMPTS = 5;
+// endpoint is not idempotent (see ARCHITECTURE.md), so this polls for the
+// winner of claimInvoiceStep to finish instead of racing it. Conversion is
+// six Zoho calls, so allow well over the typical few seconds.
+const CLAIM_WAIT_ATTEMPTS = 15;
 const CLAIM_WAIT_DELAY_MS = 1000;
 
 function sleep(ms: number): Promise<void> {
@@ -30,31 +31,27 @@ export async function convertZohoInvoice(
 ): Promise<ConvertZohoInvoiceResult> {
   const job = await findRenewalJob(supabase, dealId, billingPeriod);
 
-  if (!job || job.razorpay_step_status !== "done") {
-    throw new Error(
-      `Cannot run invoice step for deal ${dealId} (${billingPeriod}): razorpay_step_status is not "done"`,
-    );
+  if (!job) {
+    throw new Error(`Cannot run invoice step for deal ${dealId} (${billingPeriod}): no renewal_job found`);
   }
 
   if (job.invoice_step_status === "done" && job.zoho_invoice_id && job.zoho_invoice_number) {
     return { invoiceId: job.zoho_invoice_id, invoiceNumber: job.zoho_invoice_number };
   }
 
+  // A payment can arrive by bank transfer even if the Razorpay link step
+  // failed, so the only precondition is an estimate to convert.
   if (!job.zoho_estimate_id) {
     throw new Error(
       `renewal_jobs row for deal ${dealId} (${billingPeriod}) is missing zoho_estimate_id`,
     );
   }
 
-  if (job.invoice_step_status === "pending") {
-    const claimed = await claimInvoiceStep(supabase, job.id);
-    if (!claimed) {
-      // Another concurrent delivery (e.g. a Razorpay webhook retry) won the
-      // race and is converting the estimate right now. Wait for it to
-      // finish rather than also calling Zoho's non-idempotent endpoint.
-      return waitForInvoiceStepDone(supabase, dealId, billingPeriod);
-    }
-  } else if (job.invoice_step_status === "converting") {
+  const claimed = await claimInvoiceStep(supabase, job.id);
+  if (!claimed) {
+    // Another concurrent delivery (e.g. a Razorpay webhook retry) won the
+    // race and is converting the estimate right now. Wait for it to
+    // finish rather than also calling Zoho's non-idempotent endpoint.
     return waitForInvoiceStepDone(supabase, dealId, billingPeriod);
   }
 

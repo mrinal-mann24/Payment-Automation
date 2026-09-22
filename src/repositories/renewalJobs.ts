@@ -305,18 +305,24 @@ export async function markHubspotUpdated(supabase: SupabaseClient, jobId: string
   }
 }
 
+// A "converting" claim older than this belongs to a run that died
+// mid-conversion and may be taken over.
+const STALE_CONVERTING_MS = 2 * 60 * 1000;
+
 // Atomically claims the invoice-conversion step by flipping
-// invoice_step_status from "pending" to "converting", conditioned on it
-// still being "pending" at the DB level. Two concurrent Razorpay webhook
-// deliveries for the same job will race this update; only one can match
-// the .eq("invoice_step_status", "pending") filter, so only one caller
-// gets claimed:true and is allowed to call Zoho's non-idempotent
+// invoice_step_status to "converting", conditioned at the DB level on it
+// being claimable. Two concurrent deliveries for the same job will race
+// this update; only one can match the filter, so only one caller gets
+// claimed:true and is allowed to call Zoho's non-idempotent
 // /invoices/fromestimates conversion. The loser gets claimed:false and
-// must not proceed.
+// must not proceed. A step left "failed" by an earlier attempt, or
+// "converting" by a run that died, is claimable too — safe because
+// convertEstimateToInvoice checks the estimate's real Zoho status first.
 export async function claimInvoiceStep(
   supabase: SupabaseClient,
   jobId: string,
 ): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - STALE_CONVERTING_MS).toISOString();
   const { data, error } = await supabase
     .from("renewal_jobs")
     .update({
@@ -324,7 +330,9 @@ export async function claimInvoiceStep(
       updated_at: new Date().toISOString(),
     })
     .eq("id", jobId)
-    .eq("invoice_step_status", "pending")
+    .or(
+      `invoice_step_status.eq.pending,invoice_step_status.eq.failed,and(invoice_step_status.eq.converting,updated_at.lt.${staleBefore})`,
+    )
     .select("id");
 
   if (error) {
@@ -464,6 +472,116 @@ export async function markReminderSkipped(
   if (error) {
     throw new Error(`Failed to record reminder skip on renewal_jobs: ${error.message}`);
   }
+}
+
+export async function findRenewalJobById(supabase: SupabaseClient, jobId: string): Promise<RenewalJob | null> {
+  const { data, error } = await supabase.from("renewal_jobs").select("*").eq("id", jobId).maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to look up renewal_jobs row by id: ${error.message}`);
+  }
+
+  return data as RenewalJob | null;
+}
+
+export interface PaymentDetails {
+  method: string;
+  amount: number | null;
+  paymentDate: string; // YYYY-MM-DD, IST
+  narration: string | null;
+  reference: string | null; // e.g. the Razorpay payment id
+}
+
+// First writer wins: paid_at is set only while it is still null, so a
+// duplicate Razorpay delivery, a double-click, or a Razorpay-vs-manual race
+// records exactly one payment. Returns whether this call recorded it.
+export async function claimPayment(
+  supabase: SupabaseClient,
+  jobId: string,
+  payment: PaymentDetails,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      paid_at: new Date().toISOString(),
+      payment_method: payment.method,
+      payment_amount: payment.amount,
+      payment_date: payment.paymentDate,
+      payment_narration: payment.narration,
+      payment_reference: payment.reference,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId)
+    .is("paid_at", null)
+    .select("id");
+
+  if (error) {
+    throw new Error(`Failed to record payment on renewal_jobs: ${error.message}`);
+  }
+
+  return (data?.length ?? 0) > 0;
+}
+
+// A real second payment against an already-paid cycle must never be
+// silent: keep it in error_log for the team to reconcile.
+export async function recordDuplicatePayment(
+  supabase: SupabaseClient,
+  jobId: string,
+  payment: PaymentDetails,
+): Promise<void> {
+  const { error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      error_log: {
+        step: "duplicate_payment",
+        message: `a second payment (${payment.method}${payment.reference ? ` ${payment.reference}` : ""}, amount ${payment.amount ?? "unknown"}) arrived after this cycle was already paid`,
+        payment,
+        at: new Date().toISOString(),
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+
+  if (error) {
+    throw new Error(`Failed to record duplicate payment on renewal_jobs: ${error.message}`);
+  }
+}
+
+export async function saveHubspotLineItemId(
+  supabase: SupabaseClient,
+  jobId: string,
+  lineItemId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      hubspot_line_item_id: lineItemId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+
+  if (error) {
+    throw new Error(`Failed to record HubSpot line item on renewal_jobs: ${error.message}`);
+  }
+}
+
+// Paid cycles with any settlement step still outstanding. Re-run daily so a
+// manual payment (which has no Razorpay retries behind it) never stays
+// half-settled after a transient Zoho/Periskope/HubSpot failure.
+export async function findPaidUnsettledJobs(supabase: SupabaseClient): Promise<RenewalJob[]> {
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .select("*")
+    .not("paid_at", "is", null)
+    .or(
+      "invoice_step_status.neq.done,periskope_payment_confirmed_sent.is.false,invoice_email_sent.is.false,hubspot_renewal_done.is.false",
+    );
+
+  if (error) {
+    throw new Error(`Failed to look up paid-but-unsettled renewal_jobs rows: ${error.message}`);
+  }
+
+  return (data ?? []) as RenewalJob[];
 }
 
 export async function markEstimateEmailSent(supabase: SupabaseClient, jobId: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPaymentLink, verifyWebhookSignature } from "../clients/razorpay.js";
+import { cancelPaymentLink, createPaymentLink, fetchPaymentLink, verifyWebhookSignature } from "../clients/razorpay.js";
 
 const originalFetch = global.fetch;
 
@@ -99,5 +99,56 @@ describe("verifyWebhookSignature", () => {
       .digest("hex");
 
     expect(verifyWebhookSignature(JSON.stringify({ event: "tampered" }), signature)).toBe(false);
+  });
+});
+
+describe("cancelPaymentLink / fetchPaymentLink", () => {
+  const linkWithStatus = (status: string) => ({
+    status: 200,
+    json: async () => ({ id: "plink_1", status, short_url: "https://rzp.io/i/1" }),
+  });
+
+  it("cancels an open link", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(linkWithStatus("cancelled"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    expect(await cancelPaymentLink("plink_1")).toBe("cancelled");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/payment_links/plink_1/cancel");
+  });
+
+  it("tolerates a link that was already cancelled", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 400, json: async () => ({ error: { description: "already cancelled" } }) })
+      .mockResolvedValueOnce(linkWithStatus("cancelled"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    expect(await cancelPaymentLink("plink_1")).toBe("already_cancelled");
+  });
+
+  it("reports a link that was already paid (possible double payment) without throwing", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 400, json: async () => ({ error: { description: "cannot cancel" } }) })
+      .mockResolvedValueOnce(linkWithStatus("paid"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    expect(await cancelPaymentLink("plink_1")).toBe("already_paid");
+  });
+
+  it("throws for any other failure", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 500, json: async () => ({ error: { description: "server error" } }) })
+      .mockResolvedValueOnce(linkWithStatus("created"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(cancelPaymentLink("plink_1")).rejects.toThrow(/Razorpay API error 500/);
+  });
+
+  it("fetchPaymentLink returns the current link status", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(linkWithStatus("paid")) as unknown as typeof fetch;
+
+    expect(await fetchPaymentLink("plink_1")).toMatchObject({ status: "paid" });
   });
 });
