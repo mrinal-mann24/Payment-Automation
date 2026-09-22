@@ -82,10 +82,11 @@ export async function createAdditionChargeRow(
   dealId: string,
   amount: number,
   description: string,
+  narration: string | null,
 ): Promise<AdditionCharge> {
   const { data, error } = await supabase
     .from("addition_charges")
-    .insert({ hubspot_deal_id: dealId, amount, description })
+    .insert({ hubspot_deal_id: dealId, amount, description, narration })
     .select("*")
     .single();
 
@@ -199,4 +200,55 @@ export async function markAdditionPaymentConfirmedSent(
   if (error) {
     throw new Error(`Failed to record addition_charges payment-confirmed send: ${error.message}`);
   }
+}
+
+async function updateAdditionCharge(
+  supabase: SupabaseClient,
+  id: string,
+  fields: Record<string, unknown>,
+  what: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("addition_charges")
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(`Failed to record addition_charges ${what}: ${error.message}`);
+  }
+}
+
+export function markAdditionPeriskopeSent(supabase: SupabaseClient, id: string): Promise<void> {
+  return updateAdditionCharge(supabase, id, { periskope_sent: true, periskope_skip_reason: null }, "quote send");
+}
+
+export function markAdditionPeriskopeSkipped(supabase: SupabaseClient, id: string, reason: string): Promise<void> {
+  return updateAdditionCharge(supabase, id, { periskope_skip_reason: reason }, "quote skip");
+}
+
+export function markAdditionEstimateEmailSent(supabase: SupabaseClient, id: string): Promise<void> {
+  return updateAdditionCharge(supabase, id, { estimate_email_sent: true, email_error: null }, "quote email");
+}
+
+export function markAdditionInvoiceEmailSent(supabase: SupabaseClient, id: string): Promise<void> {
+  return updateAdditionCharge(supabase, id, { invoice_email_sent: true, email_error: null }, "invoice email");
+}
+
+export function markAdditionEmailError(supabase: SupabaseClient, id: string, message: string): Promise<void> {
+  return updateAdditionCharge(supabase, id, { email_error: message }, "email error");
+}
+
+// Newest first, for the admin page's one-time quotes table.
+export async function listRecentAdditionCharges(supabase: SupabaseClient, limit = 100): Promise<AdditionCharge[]> {
+  const { data, error } = await supabase
+    .from("addition_charges")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(`Failed to list addition_charges rows: ${error.message}`);
+  }
+
+  return (data ?? []) as AdditionCharge[];
 }

@@ -7,6 +7,7 @@ import { findAdditionChargeByEstimateNumber } from "../repositories/additionChar
 import { SettlementInProgressError, settleRenewalPayment } from "../steps/settleRenewalPayment.js";
 import { convertAdditionInvoice } from "../steps/convertAdditionInvoice.js";
 import { sendAdditionPaymentConfirmation } from "../steps/sendAdditionPaymentConfirmation.js";
+import { sendAdditionInvoiceEmail } from "../steps/sendAdditionInvoiceEmail.js";
 import { istToday, unixSecondsToIstDate } from "../utils/billingCycle.js";
 
 const paymentLinkPaidSchema = z.object({
@@ -106,7 +107,21 @@ razorpayWebhookRouter.post(
             : `[razorpayWebhook] addition charge ${estimateNumber} -> payment-confirmation message skipped: ${skipReason}`,
         );
 
-        res.status(200).json({ received: true, processed: true, periskopeSent: sent, periskopeSkipReason: skipReason });
+        const email = await sendAdditionInvoiceEmail(supabase, estimateNumber);
+        console.log(
+          email.sent
+            ? `[razorpayWebhook] addition charge ${estimateNumber} -> invoice email sent`
+            : `[razorpayWebhook] addition charge ${estimateNumber} -> invoice email not sent: ${email.error}`,
+        );
+
+        res.status(200).json({
+          received: true,
+          processed: true,
+          periskopeSent: sent,
+          periskopeSkipReason: skipReason,
+          emailSent: email.sent,
+          emailError: email.error,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[razorpayWebhook] addition charge ${estimateNumber} failed: ${message}`);

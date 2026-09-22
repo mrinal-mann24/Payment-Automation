@@ -167,10 +167,13 @@ pricingAdminRouter.post("/admin/pricing/generate-quote", async (req: Request, re
   }
 });
 
+// One-time quote: service name + optional narration, sent to the group and
+// by email like a renewal quote.
 const sendAdditionSchema = z.object({
   dealId: z.string().min(1),
   amount: z.number().positive(),
-  description: z.string().min(1),
+  service: z.string().trim().min(1).max(200),
+  narration: z.string().trim().max(500).optional(),
 });
 
 pricingAdminRouter.post("/admin/pricing/send-addition", async (req: Request, res: Response) => {
@@ -186,12 +189,13 @@ pricingAdminRouter.post("/admin/pricing/send-addition", async (req: Request, res
       supabase,
       parsed.data.dealId,
       parsed.data.amount,
-      parsed.data.description,
+      parsed.data.service,
+      parsed.data.narration || null,
     );
     res.status(200).json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    res.status(502).json({ error: "Failed to send addition charge", details: message });
+    res.status(502).json({ error: "Failed to send the one-time quote", details: message });
   }
 });
 
