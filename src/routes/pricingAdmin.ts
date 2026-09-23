@@ -9,12 +9,19 @@ import {
   updateDealAccountantEmails,
   type DealEmails,
 } from "../clients/hubspot.js";
-import { listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
+import { fetchPaymentLink } from "../clients/razorpay.js";
+import { findAdditionChargeById, listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
 import { upsertClientPricing } from "../repositories/clientPricing.js";
 import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
 import { createAdditionCharge } from "../steps/createAdditionCharge.js";
-import { SettlementInProgressError, settleRenewalPayment } from "../steps/settleRenewalPayment.js";
-import { billingMonthKey, daysBetween, istToday, servicePeriodFrom } from "../utils/billingCycle.js";
+import { settleAdditionPayment } from "../steps/settleAdditionPayment.js";
+import {
+  PAYMENT_METHODS,
+  SettlementInProgressError,
+  settleRenewalPayment,
+  type PaymentInput,
+} from "../steps/settleRenewalPayment.js";
+import { billingMonthKey, daysBetween, istToday, servicePeriodFrom, unixSecondsToIstDate } from "../utils/billingCycle.js";
 import { deriveCycleStatus } from "../utils/cycleStatus.js";
 import { classifyDeal, cycleLabel, type DealClassification } from "../utils/monthlyEligibility.js";
 import { pricingAdminHtml } from "./pricingAdminPage.js";
@@ -43,6 +50,7 @@ function cycleView(job: RenewalJob) {
     paymentAmount: job.payment_amount,
     paymentDate: job.payment_date,
     paymentNarration: job.payment_narration,
+    zohoPaid: Boolean(job.zoho_payment_id),
     remindersSent: [job.reminder_1_sent_at, job.reminder_2_sent_at, job.reminder_3_sent_at].filter(Boolean).length,
     issue: job.email_error ?? (errorLog?.message ? `${errorLog.step ?? "error"}: ${errorLog.message}` : null),
   };
@@ -88,7 +96,8 @@ function emailView(emails: DealEmails | undefined) {
   return { accountantEmail, sendsTo: parseEmailList(accountantEmail), invalid: invalidEmailTokens(accountantEmail ?? "") };
 }
 
-// One-time quotes: PAID once the Razorpay webhook has converted the invoice.
+// One-time quotes: PAID once a payment is recorded — by the Razorpay
+// webhook or from the admin page.
 function additionView(charge: AdditionCharge, dealNames: Map<string, string>) {
   const errorLog = charge.error_log as { step?: string; message?: string } | null;
   return {
@@ -103,13 +112,13 @@ function additionView(charge: AdditionCharge, dealNames: Map<string, string>) {
     shortUrl: charge.razorpay_short_url,
     invoiceNumber: charge.zoho_invoice_number,
     status:
-      charge.status === "failed"
-        ? "failed"
-        : charge.invoice_step_status === "done"
-          ? "paid"
-          : charge.status === "done"
-            ? "payment_pending"
-            : "unpaid",
+      charge.status === "failed" ? "failed" : charge.paid_at ? "paid" : charge.status === "done" ? "payment_pending" : "unpaid",
+    paidAt: charge.paid_at,
+    paymentMethod: charge.payment_method,
+    paymentAmount: charge.payment_amount,
+    paymentDate: charge.payment_date,
+    paymentNarration: charge.payment_narration,
+    zohoPaid: Boolean(charge.zoho_payment_id),
     whatsappSent: charge.periskope_sent,
     whatsappSkipReason: charge.periskope_skip_reason,
     emailSent: charge.estimate_email_sent,
@@ -250,17 +259,60 @@ pricingAdminRouter.post("/admin/pricing/send-addition", async (req: Request, res
   }
 });
 
-// Manual payments — "Paid through Yes Bank" is this with method yes_bank and
-// the date + narration entered; "Record manual payment" adds amount, method
-// and reference. Razorpay payments only ever come in through the webhook.
+// Marking something paid from the admin page — "Mark paid by Yes Bank"
+// (date + narration), "Record manual payment" (amount, method, reference)
+// and "Mark paid by Razorpay" for a webhook that never arrived: that one is
+// only accepted when Razorpay itself shows the link as paid, and the
+// payment id, amount and date are taken from Razorpay.
 const recordPaymentSchema = z.object({
   jobId: z.string().min(1),
-  method: z.enum(["yes_bank", "upi", "neft", "cheque", "cash", "other"]),
+  method: z.enum(PAYMENT_METHODS),
   amount: z.number().positive().optional(),
   paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   narration: z.string().trim().max(500).optional(),
   reference: z.string().trim().max(100).optional(),
 });
+
+const recordAdditionPaymentSchema = recordPaymentSchema.omit({ jobId: true }).extend({ chargeId: z.string().min(1) });
+
+type PaymentRequest = Omit<z.infer<typeof recordPaymentSchema>, "jobId">;
+
+async function resolvePayment(
+  input: PaymentRequest,
+  quoteTotal: number | null,
+  paymentLinkId: string | null,
+): Promise<{ payment: PaymentInput } | { refused: string }> {
+  if (input.method !== "razorpay") {
+    return {
+      payment: {
+        method: input.method,
+        amount: input.amount ?? quoteTotal,
+        paymentDate: input.paymentDate ?? istToday(),
+        narration: input.narration || null,
+        reference: input.reference || null,
+      },
+    };
+  }
+  if (!paymentLinkId) {
+    return { refused: "This quote has no Razorpay link, so it cannot have been paid through Razorpay" };
+  }
+  const link = await fetchPaymentLink(paymentLinkId);
+  if (link.status !== "paid") {
+    return {
+      refused: `Razorpay shows this link as "${link.status}", not paid. If the client paid another way, use Record manual payment`,
+    };
+  }
+  const captured = link.payments?.find((p) => p.status === "captured") ?? link.payments?.[0];
+  return {
+    payment: {
+      method: "razorpay",
+      amount: link.amount_paid ? link.amount_paid / 100 : quoteTotal,
+      paymentDate: captured ? unixSecondsToIstDate(captured.created_at) : istToday(),
+      narration: "marked paid by Razorpay from the admin page (webhook not received)",
+      reference: captured?.payment_id ?? null,
+    },
+  };
+}
 
 pricingAdminRouter.post("/admin/pricing/record-payment", async (req: Request, res: Response) => {
   const parsed = recordPaymentSchema.safeParse(req.body);
@@ -281,13 +333,12 @@ pricingAdminRouter.post("/admin/pricing/record-payment", async (req: Request, re
       return;
     }
 
-    const result = await settleRenewalPayment(supabase, job, {
-      method: parsed.data.method,
-      amount: parsed.data.amount ?? job.zoho_estimate_total,
-      paymentDate: parsed.data.paymentDate ?? istToday(),
-      narration: parsed.data.narration || null,
-      reference: parsed.data.reference || null,
-    });
+    const resolved = await resolvePayment(parsed.data, job.zoho_estimate_total, job.razorpay_payment_link_id);
+    if ("refused" in resolved) {
+      res.status(409).json({ error: resolved.refused });
+      return;
+    }
+    const result = await settleRenewalPayment(supabase, job, resolved.payment);
     console.log(
       `[pricingAdmin] deal ${job.hubspot_deal_id} (${job.billing_period}) -> ${parsed.data.method} payment ` +
         `${result.recordedPayment ? "recorded" : `not recorded (already paid via ${result.paidVia})`}` +
@@ -297,6 +348,47 @@ pricingAdminRouter.post("/admin/pricing/record-payment", async (req: Request, re
   } catch (err) {
     if (err instanceof SettlementInProgressError) {
       res.status(409).json({ error: "A payment for this cycle is already being processed; refresh and try again" });
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to record payment", details: message });
+  }
+});
+
+pricingAdminRouter.post("/admin/pricing/record-addition-payment", async (req: Request, res: Response) => {
+  const parsed = recordAdditionPaymentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseClient();
+    const charge = await findAdditionChargeById(supabase, parsed.data.chargeId);
+    if (!charge) {
+      res.status(404).json({ error: "No one-time quote found for that id" });
+      return;
+    }
+    if (charge.status !== "done" || !charge.zoho_estimate_id) {
+      res.status(409).json({ error: "This one-time quote was not sent; a payment cannot be recorded against it" });
+      return;
+    }
+
+    const resolved = await resolvePayment(parsed.data, charge.zoho_estimate_total, charge.razorpay_payment_link_id);
+    if ("refused" in resolved) {
+      res.status(409).json({ error: resolved.refused });
+      return;
+    }
+    const result = await settleAdditionPayment(supabase, charge, resolved.payment);
+    console.log(
+      `[pricingAdmin] one-time quote ${charge.zoho_estimate_number} (deal ${charge.hubspot_deal_id}) -> ${parsed.data.method} payment ` +
+        `${result.recordedPayment ? "recorded" : `not recorded (already paid via ${result.paidVia})`}` +
+        (result.errors.length ? `; outstanding: ${result.errors.join("; ")}` : ""),
+    );
+    res.status(200).json(result);
+  } catch (err) {
+    if (err instanceof SettlementInProgressError) {
+      res.status(409).json({ error: "A payment for this quote is already being processed; refresh and try again" });
       return;
     }
     const message = err instanceof Error ? err.message : String(err);

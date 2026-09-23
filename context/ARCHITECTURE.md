@@ -207,6 +207,12 @@ could be minutes or weeks after step 3.
   marked the whole step `failed` in `renewal_jobs` — so Zoho showed a
   real invoice while Supabase showed `failed`, which looks like a
   contradiction until you trace it to that one specific later call.
+- **Scope still missing (2026-09-23): `ZohoBooks.customerpayments.CREATE`.**
+  `recordInvoicePayment` (`POST /customerpayments`, §3.8) marks the invoice
+  Paid after every settlement; with the current token it gets 401 code 57,
+  the step is reported as "Zoho payment pending" and retried daily. Fix:
+  regenerate the refresh token with that scope added (plus
+  `customerpayments.READ`) and update `ZOHO_REFRESH_TOKEN`.
 - Line items can be custom (name/rate/quantity) without a pre-registered
   item_id, or mapped to catalog items — decision in §6
 - **Hardened in a bug-fix pass**: `getAccessToken` (token refresh) now
@@ -604,6 +610,18 @@ distinguished by which table's estimate number matches. On a match:
    `markRenewalDone`) — an addition charge has no dealstage to move;
    the invoice/payment record lives entirely in `addition_charges`.
 
+**Rewritten 2026-09-23**: the webhook branch above now calls
+`src/steps/settleAdditionPayment.ts`, the one-time quote's counterpart of
+`settleRenewalPayment` — `claimAdditionPayment` (`paid_at IS NULL`, first
+writer wins; PAID ⇔ `addition_charges.paid_at`, migration `0012`) → cancel
+the Razorpay link if paid outside Razorpay → `convertAdditionInvoice` →
+`recordAdditionZohoPayment` → WhatsApp confirmation → invoice email, each
+independent, errors collected, in-flight set, daily sweep. The admin page
+gives every unpaid one-time quote the same **Mark paid by Yes Bank / Mark
+paid by Razorpay / Record manual payment** buttons as a cycle
+(`POST /admin/pricing/record-addition-payment`, same fields keyed by
+`chargeId`).
+
 **Admin interface**: `GET /admin/pricing` (`src/routes/pricingAdmin.ts`,
 HTML inlined as a template string in `src/routes/pricingAdminPage.ts` —
 not a static file, since `tsc`'s build step doesn't copy non-`.ts`
@@ -748,13 +766,21 @@ existing steps; there is no new table and no second state machine.
   `invoice_email_sent` / `email_error`. **Not yet exercised live** — scope
   and PDF-attachment behaviour to confirm.
 - **Settlement** (`src/steps/settleRenewalPayment.ts` — the Razorpay
-  webhook, "Paid through Yes Bank", "Record manual payment" and the daily
-  sweep all call it): `claimPayment` sets `paid_at` + `payment_*` only
-  while `paid_at IS NULL` (first writer wins; a real second payment is
-  written to `error_log` as `duplicate_payment`); a non-Razorpay payment
-  cancels the Razorpay link first; then invoice conversion, WhatsApp
+  webhook, "Mark paid by Yes Bank", "Mark paid by Razorpay", "Record
+  manual payment" and the daily sweep all call it): `claimPayment` sets
+  `paid_at` + `payment_*` only while `paid_at IS NULL` (first writer wins;
+  a real second payment is written to `error_log` as
+  `duplicate_payment`); a non-Razorpay payment cancels the Razorpay link
+  first; then invoice conversion, the **Zoho customer payment**
+  (`src/steps/recordZohoPayment.ts` → `recordInvoicePayment`: full balance,
+  `banktransfer` for Yes Bank / NEFT, `check`, `cash`, else `others`,
+  method + narration in the description, `zoho_payment_id` stored so it
+  runs once; an invoice Zoho already shows as paid is left alone), WhatsApp
   confirmation, invoice email and HubSpot each run independently with
-  errors collected. An in-memory in-flight set rejects overlapping
+  errors collected. **"Mark paid by Razorpay"** (a webhook that never
+  arrived) is accepted only when `GET /payment_links/{id}` reports
+  `status: paid`; the payment id, amount and date come from the link's
+  `payments[]` (`resolvePayment` in `pricingAdmin.ts`, 409 otherwise). An in-memory in-flight set rejects overlapping
   settlements of one cycle (webhook 503, admin 409); the webhook answers
   502 while any step is outstanding so Razorpay redelivers;
   `src/jobs/settlementSweep.ts` is the daily retry for manual payments.
@@ -791,9 +817,11 @@ existing steps; there is no new table and no second state machine.
   quote. Summary strip: quoting today, renewal date needs fixing, needs
   HubSpot fix, no accountant email, unpaid cycles, one-time quotes.
   Billing-cycles table (unpaid rows plus any cycle started this month) with
-  **Paid through Yes Bank** and **Record manual payment**
-  (`POST /admin/pricing/record-payment`; both take the real payment date,
-  which becomes HubSpot's Date Paid). The Clients table shows and edits each
+  **Mark paid by Yes Bank**, **Mark paid by Razorpay** and **Record manual
+  payment** (`POST /admin/pricing/record-payment`; the bank/manual ones
+  take the real payment date, which becomes HubSpot's Date Paid and the
+  Zoho payment date); a paid row says whether the Zoho payment is
+  recorded. The same three buttons sit beside every unpaid one-time quote. The Clients table shows and edits each
   deal's Accountant Email list in place (`POST
   /admin/pricing/accountant-email` with the list as typed → PATCH of the
   field joined with ", "; blank clears it; junk tokens such as "NA" are
@@ -809,8 +837,10 @@ existing steps; there is no new table and no second state machine.
   `1970-01-01` placeholder — the last 15 are quoted only after the team
   sets the date in HubSpot. Three deals have no dated line item;
   every deal's Accountant Email is empty, so nothing is emailed until it is
-  filled. No Zoho customer payment is recorded (unchanged): if Zoho's own
-  automated payment reminders are on, Zoho will chase paid customers.
+  filled. The Zoho customer payment is recorded on every settlement from
+  2026-09-23, but only once the token carries
+  `ZohoBooks.customerpayments.CREATE` (§3.3) — until then every paid
+  cycle shows "Zoho payment pending" and the sweep retries daily.
 
 ## 4. Idempotency
 - Re-running the cron (or manually re-triggering `/webhooks/renewal`) for
@@ -892,6 +922,12 @@ existing steps; there is no new table and no second state machine.
   Date only moves forward on payment;
   `hubspot_line_item_id` is stored before the dealstage PATCH so a paid
   cycle never gets two line items; `noOverlap` on the cron.
+- **Added 2026-09-23**: `claimAdditionPayment` gives one-time quotes the
+  same first-writer-wins payment claim; `zoho_payment_id` (both tables)
+  makes the Zoho customer payment run once, and `recordInvoicePayment`
+  checks the invoice balance first so a payment entered in Zoho by hand is
+  never doubled; "Mark paid by Razorpay" is verified against Razorpay
+  before anything is written.
 
 ## 5. Credentials (env vars — never commit)
 - `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, `ZOHO_ORG_ID`

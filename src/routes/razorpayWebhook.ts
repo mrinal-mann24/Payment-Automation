@@ -5,9 +5,7 @@ import { verifyWebhookSignature } from "../clients/razorpay.js";
 import { findRenewalJobByEstimateNumber } from "../repositories/renewalJobs.js";
 import { findAdditionChargeByEstimateNumber } from "../repositories/additionCharges.js";
 import { SettlementInProgressError, settleRenewalPayment } from "../steps/settleRenewalPayment.js";
-import { convertAdditionInvoice } from "../steps/convertAdditionInvoice.js";
-import { sendAdditionPaymentConfirmation } from "../steps/sendAdditionPaymentConfirmation.js";
-import { sendAdditionInvoiceEmail } from "../steps/sendAdditionInvoiceEmail.js";
+import { settleAdditionPayment } from "../steps/settleAdditionPayment.js";
 import { istToday, unixSecondsToIstDate } from "../utils/billingCycle.js";
 
 const paymentLinkPaidSchema = z.object({
@@ -59,17 +57,19 @@ razorpayWebhookRouter.post(
     console.log(`[razorpayWebhook] payment_link.paid for estimate ${estimateNumber}`);
     const supabase = getSupabaseClient();
 
+    const paymentEntity = parsed.data.payload.payment?.entity;
+    const payment = {
+      method: "razorpay" as const,
+      amount: paymentEntity ? paymentEntity.amount / 100 : null,
+      paymentDate: paymentEntity ? unixSecondsToIstDate(paymentEntity.created_at) : istToday(),
+      narration: null,
+      reference: paymentEntity?.id ?? null,
+    };
+
     const job = await findRenewalJobByEstimateNumber(supabase, estimateNumber);
     if (job) {
-      const paymentEntity = parsed.data.payload.payment?.entity;
       try {
-        const result = await settleRenewalPayment(supabase, job, {
-          method: "razorpay",
-          amount: paymentEntity ? paymentEntity.amount / 100 : null,
-          paymentDate: paymentEntity ? unixSecondsToIstDate(paymentEntity.created_at) : istToday(),
-          narration: null,
-          reference: paymentEntity?.id ?? null,
-        });
+        const result = await settleRenewalPayment(supabase, job, payment);
         console.log(
           `[razorpayWebhook] deal ${job.hubspot_deal_id} (${job.billing_period}) -> ` +
             `${result.recordedPayment ? "payment recorded" : `already paid via ${result.paidVia}`}, ` +
@@ -96,35 +96,23 @@ razorpayWebhookRouter.post(
     const additionCharge = await findAdditionChargeByEstimateNumber(supabase, estimateNumber);
     if (additionCharge && additionCharge.status === "done") {
       try {
-        console.log(`[razorpayWebhook] addition charge ${estimateNumber} -> converting estimate to invoice`);
-        const { invoiceId, invoiceNumber } = await convertAdditionInvoice(supabase, estimateNumber);
-        console.log(`[razorpayWebhook] addition charge ${estimateNumber} -> invoice ${invoiceNumber} (${invoiceId})`);
-
-        const { sent, skipReason } = await sendAdditionPaymentConfirmation(supabase, estimateNumber);
+        const result = await settleAdditionPayment(supabase, additionCharge, payment);
         console.log(
-          sent
-            ? `[razorpayWebhook] addition charge ${estimateNumber} -> payment-confirmation WhatsApp message sent`
-            : `[razorpayWebhook] addition charge ${estimateNumber} -> payment-confirmation message skipped: ${skipReason}`,
+          `[razorpayWebhook] one-time quote ${estimateNumber} (deal ${additionCharge.hubspot_deal_id}) -> ` +
+            `${result.recordedPayment ? "payment recorded" : `already paid via ${result.paidVia}`}, ` +
+            `invoice ${result.invoiceNumber ?? "pending"}, Zoho payment ${result.zohoPaymentRecorded ? "recorded" : "pending"}, ` +
+            `WhatsApp ${result.whatsappSent ? "sent" : "not sent"}, email ${result.emailSent ? "sent" : "not sent"}` +
+            (result.errors.length ? `; errors: ${result.errors.join("; ")}` : ""),
         );
-
-        const email = await sendAdditionInvoiceEmail(supabase, estimateNumber);
-        console.log(
-          email.sent
-            ? `[razorpayWebhook] addition charge ${estimateNumber} -> invoice email sent`
-            : `[razorpayWebhook] addition charge ${estimateNumber} -> invoice email not sent: ${email.error}`,
-        );
-
-        res.status(200).json({
-          received: true,
-          processed: true,
-          periskopeSent: sent,
-          periskopeSkipReason: skipReason,
-          emailSent: email.sent,
-          emailError: email.error,
-        });
+        res.status(result.errors.length ? 502 : 200).json({ received: true, processed: true, ...result });
       } catch (err) {
+        if (err instanceof SettlementInProgressError) {
+          console.log(`[razorpayWebhook] one-time quote ${estimateNumber} -> settlement already in progress, asking Razorpay to retry`);
+          res.status(503).json({ error: "Settlement in progress, retry later" });
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[razorpayWebhook] addition charge ${estimateNumber} failed: ${message}`);
+        console.error(`[razorpayWebhook] one-time quote ${estimateNumber} failed: ${message}`);
         res.status(502).json({ error: "Failed to run addition-charge payment-confirmation pipeline", details: message });
       }
       return;

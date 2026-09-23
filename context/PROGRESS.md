@@ -126,6 +126,17 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-23 (Zoho paid + mark-paid buttons) — Every settlement now records
+  a Zoho customer payment so the invoice shows Paid (`recordZohoPayment`,
+  `zoho_payment_id` on both tables, migration 0012 applied live; the
+  token lacks `customerpayments.CREATE` — 401 code 57 — so it stays
+  "Zoho payment pending" and is retried daily until re-granted). Billing
+  cycles and one-time quotes both get **Mark paid by Yes Bank**, **Mark
+  paid by Razorpay** (server checks Razorpay first; refused unless the
+  link is paid) and **Record manual payment**; one-time quotes settle
+  through the new `settleAdditionPayment` (webhook, admin, sweep), with
+  `paid_at` + payment columns on `addition_charges`. Live: both Razorpay
+  buttons correctly refused on unpaid links. 206/206.
 - 2026-09-22 (quantity = months) — The line item's Quantity now counts as
   months too: the cycle is the longer of Term and Quantity, so a monthly
   item with quantity 3 is quoted as a 3-month cycle at price × quantity

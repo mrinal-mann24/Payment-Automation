@@ -30,10 +30,20 @@ unchanged for yearly customers and deals with no usable line item.
   through Zoho Books' own email API to every address in the deal's
   **Accountant Email** field (comma-separated list) — only when at least
   one is set; no fallback to the contact.
-- **Manual payments:** "Paid through Yes Bank" (date + narration) and
-  "Record manual payment" (amount, date, method, narration, reference)
-  both mark the cycle PAID and settle it exactly like a Razorpay payment;
-  the date entered becomes HubSpot's Date Paid.
+- **Marking paid (2026-09-23):** "Mark paid by Yes Bank" (date +
+  narration), "Record manual payment" (amount, date, method, narration,
+  reference) and "Mark paid by Razorpay" — for a webhook that never
+  arrived: accepted only when Razorpay itself shows the link as paid, with
+  the payment id, amount and date taken from Razorpay. All three settle
+  exactly like a webhook payment; the date entered becomes HubSpot's Date
+  Paid. The same three buttons sit beside every unpaid one-time quote.
+- **Zoho shows the invoice as Paid (2026-09-23):** every settlement records
+  a Zoho customer payment for the invoice's full balance (bank transfer for
+  Yes Bank / NEFT, cheque, cash, "others" for Razorpay / UPI / other, the
+  method and narration in the description). Needs the
+  `ZohoBooks.customerpayments.CREATE` scope, missing from the token as of
+  2026-09-23; until it is re-granted the step fails, is shown as "Zoho
+  payment pending" and is retried by the daily sweep.
 - **HubSpot on payment:** one complete "Renewal" line item per paid cycle
   with the cycle's frequency, term, start date and Date Paid — a new item
   each time, never an edit of an old one — then Next Renewal Date moved
@@ -59,11 +69,16 @@ unchanged for yearly customers and deals with no usable line item.
   owns. `POST /webhooks/renewal` SHALL quote any due deal regardless of
   the window and refuse (409) a not-due or unlisted one.
 - REQ-6.3 A cycle is PAID ⇔ `renewal_jobs.paid_at` is set. Razorpay
-  (webhook), "Paid through Yes Bank" and manual entry SHALL all set it
-  through the same `settleRenewalPayment` path: record payment → cancel
-  the Razorpay link if paid outside Razorpay → Zoho invoice → WhatsApp
+  (webhook or "Mark paid by Razorpay"), "Mark paid by Yes Bank" and manual
+  entry SHALL all set it through the same `settleRenewalPayment` path:
+  record payment → cancel the Razorpay link if paid outside Razorpay →
+  Zoho invoice → Zoho customer payment (invoice shows Paid) → WhatsApp
   confirmation with invoice PDF → invoice email → HubSpot line item + Next
-  Renewal Date + Renewal Done.
+  Renewal Date + Renewal Done. "Mark paid by Razorpay" SHALL be refused
+  (409) unless Razorpay reports the link as paid. A one-time quote SHALL
+  settle the same way (`settleAdditionPayment`, minus HubSpot) from the
+  webhook or the same three buttons; `addition_charges.paid_at` is its
+  PAID.
 - REQ-6.4 Recording a payment SHALL be atomic (`paid_at IS NULL` claim);
   every settlement step SHALL be independent and idempotent; a daily sweep
   re-runs the unfinished steps of any paid cycle.

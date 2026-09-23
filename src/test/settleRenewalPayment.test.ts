@@ -11,10 +11,12 @@ vi.mock("../steps/convertZohoInvoice.js", () => ({ convertZohoInvoice: vi.fn() }
 vi.mock("../steps/sendPaymentConfirmation.js", () => ({ sendPaymentConfirmation: vi.fn() }));
 vi.mock("../steps/sendInvoiceEmail.js", () => ({ sendInvoiceEmail: vi.fn() }));
 vi.mock("../steps/markRenewalDone.js", () => ({ markRenewalDone: vi.fn() }));
+vi.mock("../steps/recordZohoPayment.js", () => ({ recordZohoPayment: vi.fn() }));
 
 import { claimPayment, findRenewalJob, recordDuplicatePayment } from "../repositories/renewalJobs.js";
 import { cancelPaymentLink } from "../clients/razorpay.js";
 import { convertZohoInvoice } from "../steps/convertZohoInvoice.js";
+import { recordZohoPayment } from "../steps/recordZohoPayment.js";
 import { sendPaymentConfirmation } from "../steps/sendPaymentConfirmation.js";
 import { sendInvoiceEmail } from "../steps/sendInvoiceEmail.js";
 import { markRenewalDone } from "../steps/markRenewalDone.js";
@@ -56,6 +58,7 @@ const job = {
   payment_narration: null,
   payment_reference: null,
   hubspot_line_item_id: null,
+  zoho_payment_id: null,
   estimate_email_sent: true,
   invoice_email_sent: false,
   email_error: null,
@@ -78,6 +81,7 @@ beforeEach(() => {
   vi.mocked(sendPaymentConfirmation).mockResolvedValue({ sent: true, skipReason: null });
   vi.mocked(sendInvoiceEmail).mockResolvedValue({ sent: true, error: null });
   vi.mocked(markRenewalDone).mockResolvedValue(undefined);
+  vi.mocked(recordZohoPayment).mockResolvedValue("zpay-1");
 });
 
 describe("settleRenewalPayment", () => {
@@ -137,6 +141,31 @@ describe("settleRenewalPayment", () => {
 
     expect(recordDuplicatePayment).toHaveBeenCalledWith(fakeSupabase, "job-1", yesBankPayment);
     expect(cancelPaymentLink).not.toHaveBeenCalled();
+  });
+
+  it("records the payment in Zoho Books once the invoice exists, before the confirmation goes out", async () => {
+    const result = await settleRenewalPayment(fakeSupabase, job, yesBankPayment);
+
+    expect(recordZohoPayment).toHaveBeenCalledWith(fakeSupabase, "deal-1", "2026-10");
+    expect(vi.mocked(convertZohoInvoice).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(recordZohoPayment).mock.invocationCallOrder[0]!,
+    );
+    expect(vi.mocked(recordZohoPayment).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(sendPaymentConfirmation).mock.invocationCallOrder[0]!,
+    );
+    expect(result).toMatchObject({ zohoPaymentRecorded: true, errors: [] });
+  });
+
+  it("a Zoho payment failure (e.g. a missing scope) is reported but does not block WhatsApp, email or HubSpot", async () => {
+    vi.mocked(recordZohoPayment).mockRejectedValueOnce(new Error("Zoho Books API error 401: not authorized"));
+
+    const result = await settleRenewalPayment(fakeSupabase, job, yesBankPayment);
+
+    expect(sendPaymentConfirmation).toHaveBeenCalled();
+    expect(sendInvoiceEmail).toHaveBeenCalled();
+    expect(markRenewalDone).toHaveBeenCalled();
+    expect(result).toMatchObject({ zohoPaymentRecorded: false, hubspotDone: true });
+    expect(result.errors).toEqual(["zoho payment: Zoho Books API error 401: not authorized"]);
   });
 
   it("keeps the payment recorded and reports the error when the invoice conversion fails", async () => {

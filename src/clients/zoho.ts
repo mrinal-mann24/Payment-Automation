@@ -268,7 +268,38 @@ interface ZohoEstimateGetResponse {
 }
 
 interface ZohoInvoiceGetResponse {
-  invoice: { invoice_id: string; invoice_number: string };
+  invoice: {
+    invoice_id: string;
+    invoice_number: string;
+    customer_id: string;
+    status: string;
+    total: number;
+    balance: number;
+  };
+}
+
+export interface ZohoInvoice {
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  status: string; // draft | sent | paid | partially_paid | overdue | void …
+  total: number;
+  balance: number;
+}
+
+export async function getInvoice(invoiceId: string): Promise<ZohoInvoice> {
+  const result = (await zohoFetch(
+    `/invoices/${invoiceId}?organization_id=${config.zoho.orgId}`,
+  )) as ZohoInvoiceGetResponse;
+  const invoice = result.invoice;
+  return {
+    invoiceId: invoice.invoice_id,
+    invoiceNumber: invoice.invoice_number,
+    customerId: invoice.customer_id,
+    status: invoice.status,
+    total: invoice.total,
+    balance: invoice.balance,
+  };
 }
 
 async function getEstimate(estimateId: string): Promise<ZohoEstimateGetResponse["estimate"]> {
@@ -279,10 +310,7 @@ async function getEstimate(estimateId: string): Promise<ZohoEstimateGetResponse[
 }
 
 async function getInvoiceNumber(invoiceId: string): Promise<string> {
-  const result = (await zohoFetch(
-    `/invoices/${invoiceId}?organization_id=${config.zoho.orgId}`,
-  )) as ZohoInvoiceGetResponse;
-  return result.invoice.invoice_number;
+  return (await getInvoice(invoiceId)).invoiceNumber;
 }
 
 export async function convertEstimateToInvoice(
@@ -370,4 +398,42 @@ export async function emailInvoice(invoiceId: string, email: ZohoEmail): Promise
     method: "POST",
     body: JSON.stringify({ to_mail_ids: email.to, subject: email.subject, body: email.body }),
   });
+}
+
+export interface ZohoPaymentInput {
+  mode: string; // Zoho payment_mode: banktransfer | check | cash | others …
+  date: string; // YYYY-MM-DD
+  reference: string | null;
+  description: string;
+}
+
+// Records a customer payment for the invoice's full balance so Zoho Books
+// shows it as Paid (and its own reminders stop). Needs the
+// ZohoBooks.customerpayments.CREATE scope — missing from the token as of
+// 2026-09-22 (401, code 57), so the step fails and is retried daily until
+// the token is re-granted. An invoice Zoho already shows as paid is left
+// alone.
+export async function recordInvoicePayment(
+  invoiceId: string,
+  payment: ZohoPaymentInput,
+): Promise<{ paymentId: string; alreadyPaid: boolean }> {
+  const invoice = await getInvoice(invoiceId);
+  if (invoice.status === "paid" || invoice.balance <= 0) {
+    return { paymentId: "paid-in-zoho", alreadyPaid: true };
+  }
+
+  const result = (await zohoFetch(`/customerpayments?organization_id=${config.zoho.orgId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      customer_id: invoice.customerId,
+      payment_mode: payment.mode,
+      amount: invoice.balance,
+      date: payment.date,
+      reference_number: payment.reference ?? "",
+      description: payment.description,
+      invoices: [{ invoice_id: invoiceId, amount_applied: invoice.balance }],
+    }),
+  })) as { payment: { payment_id: string } };
+
+  return { paymentId: result.payment.payment_id, alreadyPaid: false };
 }

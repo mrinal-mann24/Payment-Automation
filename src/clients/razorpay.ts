@@ -80,6 +80,8 @@ export interface RazorpayPaymentLinkDetails {
   id: string;
   status: string; // created | partially_paid | paid | cancelled | expired
   short_url: string;
+  amount_paid?: number; // paise
+  payments?: Array<{ payment_id: string; amount: number; created_at: number; status: string }>;
 }
 
 export async function fetchPaymentLink(paymentLinkId: string): Promise<RazorpayPaymentLinkDetails> {

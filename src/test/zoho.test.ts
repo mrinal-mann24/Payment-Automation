@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEstimate, emailEstimate, emailInvoice } from "../clients/zoho.js";
+import { createEstimate, emailEstimate, emailInvoice, recordInvoicePayment } from "../clients/zoho.js";
 
 const originalFetch = global.fetch;
 
@@ -133,5 +133,63 @@ describe("createEstimate for a one-time quote", () => {
     const lineItem = (captured.body!.line_items as Array<Record<string, unknown>>)[0]!;
     expect(lineItem).toMatchObject({ name: "Site visit", quantity: 1 });
     expect(lineItem).not.toHaveProperty("description");
+  });
+});
+
+describe("recordInvoicePayment", () => {
+  function mockInvoiceFetch(invoice: { status: string; balance: number }) {
+    const calls: Array<{ path: string; method: string; body?: Record<string, unknown> | undefined }> = [];
+    global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const path = String(url);
+      if (path.startsWith("https://accounts.zoho.in/")) {
+        return new Response(JSON.stringify({ access_token: "tok", expires_in: 3600 }), { status: 200 });
+      }
+      calls.push({
+        path,
+        method: init?.method ?? "GET",
+        body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined,
+      });
+      if (path.includes("/invoices/zinv-1?")) {
+        return new Response(
+          JSON.stringify({
+            invoice: { invoice_id: "zinv-1", invoice_number: "INV-1", customer_id: "cust-1", total: 3240, ...invoice },
+          }),
+          { status: 200 },
+        );
+      }
+      if (path.includes("/customerpayments?")) {
+        return new Response(JSON.stringify({ code: 0, payment: { payment_id: "zpay-1", amount: 3240 } }), { status: 201 });
+      }
+      throw new Error(`Unexpected fetch: ${path}`);
+    }) as unknown as typeof fetch;
+    return calls;
+  }
+
+  const payment = { mode: "banktransfer", date: "2026-09-22", reference: "UTR 123", description: "Paid via Yes Bank" };
+
+  it("records a customer payment for the invoice's full balance so Zoho shows it as paid", async () => {
+    const calls = mockInvoiceFetch({ status: "sent", balance: 3240 });
+
+    expect(await recordInvoicePayment("zinv-1", payment)).toEqual({ paymentId: "zpay-1", alreadyPaid: false });
+
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(post.path).toContain("/customerpayments?organization_id=org-1");
+    expect(post.body).toEqual({
+      customer_id: "cust-1",
+      payment_mode: "banktransfer",
+      amount: 3240,
+      date: "2026-09-22",
+      reference_number: "UTR 123",
+      description: "Paid via Yes Bank",
+      invoices: [{ invoice_id: "zinv-1", amount_applied: 3240 }],
+    });
+  });
+
+  it("does not record a second payment when Zoho already shows the invoice as paid", async () => {
+    const calls = mockInvoiceFetch({ status: "paid", balance: 0 });
+
+    expect(await recordInvoicePayment("zinv-1", payment)).toEqual({ paymentId: "paid-in-zoho", alreadyPaid: true });
+
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
   });
 });

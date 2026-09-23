@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { PaymentDetails } from "./renewalJobs.js";
 
 export interface AdditionCharge {
   id: string;
@@ -22,8 +23,25 @@ export interface AdditionCharge {
   invoice_email_sent: boolean;
   email_error: string | null;
   error_log: unknown;
+  paid_at: string | null; // PAID ⇔ set, whichever way the money came
+  payment_method: string | null;
+  payment_amount: number | null;
+  payment_date: string | null;
+  payment_narration: string | null;
+  payment_reference: string | null;
+  zoho_payment_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export async function findAdditionChargeById(supabase: SupabaseClient, id: string): Promise<AdditionCharge | null> {
+  const { data, error } = await supabase.from("addition_charges").select("*").eq("id", id).maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to look up addition_charges row by id: ${error.message}`);
+  }
+
+  return data as AdditionCharge | null;
 }
 
 export async function findAdditionChargeByEstimateNumber(
@@ -248,6 +266,71 @@ export async function listRecentAdditionCharges(supabase: SupabaseClient, limit 
 
   if (error) {
     throw new Error(`Failed to list addition_charges rows: ${error.message}`);
+  }
+
+  return (data ?? []) as AdditionCharge[];
+}
+
+// First writer wins, exactly like claimPayment on renewal_jobs: a Razorpay
+// webhook, an admin click and a duplicate delivery record one payment.
+export async function claimAdditionPayment(
+  supabase: SupabaseClient,
+  id: string,
+  payment: PaymentDetails,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("addition_charges")
+    .update({
+      paid_at: new Date().toISOString(),
+      payment_method: payment.method,
+      payment_amount: payment.amount,
+      payment_date: payment.paymentDate,
+      payment_narration: payment.narration,
+      payment_reference: payment.reference,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .is("paid_at", null)
+    .select("id");
+
+  if (error) {
+    throw new Error(`Failed to record payment on addition_charges: ${error.message}`);
+  }
+
+  return (data?.length ?? 0) > 0;
+}
+
+export function recordAdditionDuplicatePayment(supabase: SupabaseClient, id: string, payment: PaymentDetails): Promise<void> {
+  return updateAdditionCharge(
+    supabase,
+    id,
+    {
+      error_log: {
+        step: "duplicate_payment",
+        message: `a second payment (${payment.method}${payment.reference ? ` ${payment.reference}` : ""}, amount ${payment.amount ?? "unknown"}) arrived after this quote was already paid`,
+        payment,
+        at: new Date().toISOString(),
+      },
+    },
+    "duplicate payment",
+  );
+}
+
+export function saveAdditionZohoPaymentId(supabase: SupabaseClient, id: string, paymentId: string): Promise<void> {
+  return updateAdditionCharge(supabase, id, { zoho_payment_id: paymentId }, "Zoho payment");
+}
+
+// Paid one-time quotes with a settlement step still outstanding — the
+// daily sweep's retry, like findPaidUnsettledJobs.
+export async function findPaidUnsettledAdditionCharges(supabase: SupabaseClient): Promise<AdditionCharge[]> {
+  const { data, error } = await supabase
+    .from("addition_charges")
+    .select("*")
+    .not("paid_at", "is", null)
+    .or("invoice_step_status.neq.done,zoho_payment_id.is.null,periskope_payment_confirmed_sent.is.false,invoice_email_sent.is.false");
+
+  if (error) {
+    throw new Error(`Failed to look up paid-but-unsettled addition_charges rows: ${error.message}`);
   }
 
   return (data ?? []) as AdditionCharge[];

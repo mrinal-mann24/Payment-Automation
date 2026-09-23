@@ -11,6 +11,7 @@ import { convertZohoInvoice } from "./convertZohoInvoice.js";
 import { sendPaymentConfirmation } from "./sendPaymentConfirmation.js";
 import { sendInvoiceEmail } from "./sendInvoiceEmail.js";
 import { markRenewalDone } from "./markRenewalDone.js";
+import { recordZohoPayment } from "./recordZohoPayment.js";
 
 export const PAYMENT_METHODS = ["razorpay", "yes_bank", "upi", "neft", "cheque", "cash", "other"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
@@ -26,6 +27,7 @@ export interface SettleRenewalPaymentResult {
   alreadyPaid: boolean;
   paidVia: string | null;
   invoiceNumber: string | null;
+  zohoPaymentRecorded: boolean;
   whatsappSent: boolean;
   whatsappSkipReason: string | null;
   emailSent: boolean;
@@ -84,7 +86,7 @@ export async function settleRenewalPayment(
         // Paid outside Razorpay: close the link straight away so the client
         // cannot pay twice, before anything slower can fail.
         if (payment.method !== "razorpay" && job.razorpay_payment_link_id) {
-          await cancelLinkBestEffort(job.razorpay_payment_link_id, dealId, billingPeriod, payment.method);
+          await cancelLinkBestEffort(job.razorpay_payment_link_id, `deal ${dealId} (${billingPeriod})`, payment.method);
         }
       } else {
         const current = (await findRenewalJob(supabase, dealId, billingPeriod)) ?? job;
@@ -104,6 +106,7 @@ export async function settleRenewalPayment(
 
     const errors: string[] = [];
     let invoiceNumber: string | null = null;
+    let zohoPaymentRecorded = false;
     let whatsapp: { sent: boolean; skipReason: string | null } = { sent: false, skipReason: null };
     let email: { sent: boolean; error: string | null } = { sent: false, error: null };
     let hubspotDone = false;
@@ -115,6 +118,13 @@ export async function settleRenewalPayment(
     }
 
     if (invoiceNumber) {
+      // Zoho first, so the invoice PDF the client receives already shows Paid.
+      try {
+        await recordZohoPayment(supabase, dealId, billingPeriod);
+        zohoPaymentRecorded = true;
+      } catch (err) {
+        errors.push(`zoho payment: ${errorMessage(err)}`);
+      }
       try {
         whatsapp = await sendPaymentConfirmation(supabase, dealId, billingPeriod);
       } catch (err) {
@@ -140,6 +150,7 @@ export async function settleRenewalPayment(
       alreadyPaid,
       paidVia,
       invoiceNumber,
+      zohoPaymentRecorded,
       whatsappSent: whatsapp.sent,
       whatsappSkipReason: whatsapp.skipReason,
       emailSent: email.sent,
@@ -152,22 +163,16 @@ export async function settleRenewalPayment(
   }
 }
 
-async function cancelLinkBestEffort(
-  paymentLinkId: string,
-  dealId: string,
-  billingPeriod: string,
-  method: string,
-): Promise<void> {
+// Shared with settleAdditionPayment; `what` names the cycle or quote in logs.
+export async function cancelLinkBestEffort(paymentLinkId: string, what: string, method: string): Promise<void> {
   try {
     const outcome = await cancelPaymentLink(paymentLinkId);
     if (outcome === "already_paid") {
       console.error(
-        `[settle] deal ${dealId} (${billingPeriod}): Razorpay link ${paymentLinkId} was ALREADY PAID before this ${method} payment was recorded — check for a double payment`,
+        `[settle] ${what}: Razorpay link ${paymentLinkId} was ALREADY PAID before this ${method} payment was recorded — check for a double payment`,
       );
     }
   } catch (err) {
-    console.error(
-      `[settle] deal ${dealId} (${billingPeriod}): could not cancel Razorpay link ${paymentLinkId}: ${errorMessage(err)}`,
-    );
+    console.error(`[settle] ${what}: could not cancel Razorpay link ${paymentLinkId}: ${errorMessage(err)}`);
   }
 }

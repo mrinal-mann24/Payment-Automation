@@ -207,7 +207,7 @@ export const pricingAdminHtml = `<!doctype html>
     <div class="card-head">
       <h2>One-time quotes</h2>
       <span class="count" id="additions-count"></span>
-      <p>Sent to the client's WhatsApp group and by email. PAID once the Razorpay payment arrives and the invoice is generated.</p>
+      <p>Sent to the client's WhatsApp group and by email. PAID once the Razorpay payment arrives, or once it is marked paid here; the invoice then goes out the same way.</p>
     </div>
     <div class="table-wrap">
       <table>
@@ -218,7 +218,9 @@ export const pricingAdminHtml = `<!doctype html>
             <th style="width:120px">Amount</th>
             <th style="min-width:170px">Quote</th>
             <th style="width:140px">Status</th>
+            <th style="min-width:170px">Payment</th>
             <th style="min-width:220px">Delivery</th>
+            <th style="min-width:320px">Actions</th>
           </tr>
         </thead>
         <tbody id="additions-body"></tbody>
@@ -320,7 +322,8 @@ function settlementSummary(result) {
   if (result.invoiceNumber) parts.push('invoice ' + result.invoiceNumber);
   parts.push(result.whatsappSent ? 'WhatsApp sent' : 'WhatsApp not sent');
   parts.push(result.emailSent ? 'email sent' : 'email not sent');
-  parts.push(result.hubspotDone ? 'HubSpot updated' : 'HubSpot pending');
+  parts.push(result.zohoPaymentRecorded ? 'Zoho marked paid' : 'Zoho payment pending');
+  if (result.hubspotDone !== undefined) parts.push(result.hubspotDone ? 'HubSpot updated' : 'HubSpot pending');
   if (result.errors && result.errors.length) parts.push('OUTSTANDING: ' + result.errors.join('; '));
   return parts.join(' · ');
 }
@@ -519,14 +522,62 @@ function renderDeals(data) {
   }
 }
 
-function paymentForm(deal, cycle, today) {
+// A "target" is whatever is being marked paid: a billing cycle or a
+// one-time quote. Both post the same fields to their own endpoint.
+function cycleTarget(deal, cycle) {
+  return {
+    label: deal.dealName + ' (' + cycle.billingPeriod + ')',
+    name: deal.dealName,
+    quoteTotal: cycle.quoteTotal,
+    hasLink: Boolean(cycle.shortUrl),
+    endpoint: '/admin/pricing/record-payment',
+    body: { jobId: cycle.jobId },
+  };
+}
+
+function additionTarget(quote) {
+  return {
+    label: quote.dealName + ' · ' + quote.service,
+    name: quote.dealName,
+    quoteTotal: quote.quoteTotal,
+    hasLink: Boolean(quote.shortUrl),
+    endpoint: '/admin/pricing/record-addition-payment',
+    body: { chargeId: quote.id },
+  };
+}
+
+async function submitPayment(target, button, busyLabel, fields) {
+  const done = busy(button, busyLabel);
+  try {
+    const result = await postJson(target.endpoint, Object.assign({}, target.body, fields));
+    const outstanding = result.errors && result.errors.length > 0;
+    toast(outstanding ? 'err' : 'ok', target.label + ': ' + settlementSummary(result), outstanding);
+    await loadDeals();
+  } catch (err) {
+    toast('err', target.name + ': ' + err.message, true);
+    done();
+  }
+}
+
+function formButtons(form, save, cancelLabel) {
+  const cancel = el('button', 'btn secondary small', cancelLabel || 'Cancel');
+  cancel.type = 'button';
+  cancel.onclick = () => form.remove();
+  const buttons = el('div', 'buttons');
+  buttons.appendChild(save);
+  buttons.appendChild(cancel);
+  return buttons;
+}
+
+function paymentForm(target, today) {
   const form = el('div', 'payment-form');
+  form.dataset.kind = 'manual';
   const amount = document.createElement('input');
   amount.type = 'number';
   amount.min = '0';
   amount.step = '0.01';
   amount.className = 'mono';
-  amount.value = cycle.quoteTotal ?? '';
+  amount.value = target.quoteTotal ?? '';
   amount.placeholder = 'Amount';
   const date = document.createElement('input');
   date.type = 'date';
@@ -549,45 +600,28 @@ function paymentForm(deal, cycle, today) {
   reference.placeholder = 'Reference (UTR etc.)';
   const save = el('button', 'btn violet small', 'Save payment');
   save.type = 'button';
-  const cancel = el('button', 'btn secondary small', 'Cancel');
-  cancel.type = 'button';
   const warn = el('div', 'warn full');
 
   const checkAmount = () => {
     const entered = Number(amount.value);
-    warn.textContent = cycle.quoteTotal !== null && Number.isFinite(entered) && entered !== Number(cycle.quoteTotal)
-      ? 'Amount differs from the quote total (' + money(cycle.quoteTotal) + '). The cycle will still be marked PAID.'
+    warn.textContent = target.quoteTotal !== null && Number.isFinite(entered) && entered !== Number(target.quoteTotal)
+      ? 'Amount differs from the quote total (' + money(target.quoteTotal) + '). It will still be marked PAID, and the Zoho invoice is settled in full.'
       : '';
   };
   amount.oninput = checkAmount;
 
-  save.onclick = async () => {
+  save.onclick = () => {
     const entered = Number(amount.value);
     if (!Number.isFinite(entered) || entered <= 0) { toast('err', 'Enter a valid amount', true); return; }
     if (!date.value) { toast('err', 'Enter the payment date', true); return; }
-    const done = busy(save, 'Saving…');
-    try {
-      const result = await postJson('/admin/pricing/record-payment', {
-        jobId: cycle.jobId,
-        method: method.value,
-        amount: entered,
-        paymentDate: date.value,
-        narration: narration.value.trim(),
-        reference: reference.value.trim(),
-      });
-      const outstanding = result.errors && result.errors.length > 0;
-      toast(outstanding ? 'err' : 'ok', deal.dealName + ' (' + cycle.billingPeriod + '): ' + settlementSummary(result), outstanding);
-      await loadDeals();
-    } catch (err) {
-      toast('err', deal.dealName + ': ' + err.message, true);
-      done();
-    }
+    submitPayment(target, save, 'Saving…', {
+      method: method.value,
+      amount: entered,
+      paymentDate: date.value,
+      narration: narration.value.trim(),
+      reference: reference.value.trim(),
+    });
   };
-  cancel.onclick = () => form.remove();
-
-  const buttons = el('div', 'buttons');
-  buttons.appendChild(save);
-  buttons.appendChild(cancel);
 
   form.appendChild(amount);
   form.appendChild(date);
@@ -595,16 +629,17 @@ function paymentForm(deal, cycle, today) {
   form.appendChild(narration);
   form.appendChild(reference);
   form.appendChild(warn);
-  form.appendChild(buttons);
+  form.appendChild(formButtons(form, save));
   return form;
 }
 
-// "Paid through Yes Bank" asks for the real payment date: the accountant
-// often sees the transfer a day or two later, and HubSpot's Date Paid must
-// carry the day the money actually arrived.
-function yesBankForm(deal, cycle, today) {
+// "Mark paid by Yes Bank" asks for the real payment date: the accountant
+// often sees the transfer a day or two later, and HubSpot's Date Paid and
+// the Zoho payment must carry the day the money actually arrived.
+function yesBankForm(target, today) {
   const form = el('div', 'payment-form');
-  const label = el('div', 'full', 'Yes Bank payment of ' + money(cycle.quoteTotal) + ' for ' + deal.dealName + ' (' + cycle.billingPeriod + ')');
+  form.dataset.kind = 'yes_bank';
+  const label = el('div', 'full', 'Yes Bank payment of ' + money(target.quoteTotal) + ' for ' + target.label);
   label.style.fontWeight = '600';
   const date = document.createElement('input');
   date.type = 'date';
@@ -616,40 +651,81 @@ function yesBankForm(deal, cycle, today) {
   narration.placeholder = 'Narration (optional, e.g. bank reference)';
   const save = el('button', 'btn teal small', 'Confirm payment');
   save.type = 'button';
-  const cancel = el('button', 'btn secondary small', 'Cancel');
-  cancel.type = 'button';
-  const hint = el('div', 'sub full', 'Payment date = the day the money reached the bank. It is written to HubSpot as Date Paid.');
+  const hint = el('div', 'sub full', 'Payment date = the day the money reached the bank. It is written to HubSpot as Date Paid and to the Zoho invoice as the payment date.');
 
-  save.onclick = async () => {
+  save.onclick = () => {
     if (!date.value) { toast('err', 'Enter the payment date', true); return; }
-    const done = busy(save, 'Recording…');
-    try {
-      const result = await postJson('/admin/pricing/record-payment', {
-        jobId: cycle.jobId,
-        method: 'yes_bank',
-        paymentDate: date.value,
-        narration: narration.value.trim(),
-      });
-      const outstanding = result.errors && result.errors.length > 0;
-      toast(outstanding ? 'err' : 'ok', deal.dealName + ' (' + cycle.billingPeriod + '): ' + settlementSummary(result), outstanding);
-      await loadDeals();
-    } catch (err) {
-      toast('err', deal.dealName + ': ' + err.message, true);
-      done();
-    }
+    submitPayment(target, save, 'Recording…', { method: 'yes_bank', paymentDate: date.value, narration: narration.value.trim() });
   };
-  cancel.onclick = () => form.remove();
-
-  const buttons = el('div', 'buttons');
-  buttons.appendChild(save);
-  buttons.appendChild(cancel);
 
   form.appendChild(label);
   form.appendChild(date);
   form.appendChild(narration);
   form.appendChild(hint);
-  form.appendChild(buttons);
+  form.appendChild(formButtons(form, save));
   return form;
+}
+
+// "Mark paid by Razorpay" is for a payment whose webhook never arrived. The
+// server asks Razorpay first and only settles when Razorpay shows the link
+// as paid, taking the payment id, amount and date from Razorpay.
+function razorpayForm(target) {
+  const form = el('div', 'payment-form');
+  form.dataset.kind = 'razorpay';
+  const label = el('div', 'full', 'Mark ' + target.label + ' as paid through Razorpay?');
+  label.style.fontWeight = '600';
+  const hint = el('div', 'sub full', 'Use this when the client paid the Razorpay link but nothing happened here. Razorpay is checked first: it only goes through if Razorpay shows the link as paid.');
+  const save = el('button', 'btn small', 'Check Razorpay and mark paid');
+  save.type = 'button';
+  save.onclick = () => submitPayment(target, save, 'Checking Razorpay…', { method: 'razorpay' });
+
+  form.appendChild(label);
+  form.appendChild(hint);
+  form.appendChild(formButtons(form, save));
+  return form;
+}
+
+// The three buttons beside every unpaid cycle and one-time quote.
+function paymentActions(target, today) {
+  const td = document.createElement('td');
+  const actions = el('div', 'row-actions');
+  const toggle = (kind, build) => () => {
+    const existing = td.querySelector('.payment-form');
+    if (existing) {
+      existing.remove();
+      if (existing.dataset.kind === kind) return;
+    }
+    td.appendChild(build());
+  };
+  const bankBtn = el('button', 'btn teal small', 'Mark paid by Yes Bank');
+  bankBtn.type = 'button';
+  bankBtn.onclick = toggle('yes_bank', () => yesBankForm(target, today));
+  actions.appendChild(bankBtn);
+  if (target.hasLink) {
+    const razorpayBtn = el('button', 'btn small', 'Mark paid by Razorpay');
+    razorpayBtn.type = 'button';
+    razorpayBtn.onclick = toggle('razorpay', () => razorpayForm(target));
+    actions.appendChild(razorpayBtn);
+  }
+  const manualBtn = el('button', 'btn violet small', 'Record manual payment');
+  manualBtn.type = 'button';
+  manualBtn.onclick = toggle('manual', () => paymentForm(target, today));
+  actions.appendChild(manualBtn);
+  td.appendChild(actions);
+  return td;
+}
+
+function paymentCell(row) {
+  const td = document.createElement('td');
+  if (row.status === 'paid') {
+    td.appendChild(el('div', 'mono', money(row.paymentAmount) + ' · ' + fmtDate(row.paymentDate)));
+    td.appendChild(el('div', 'sub', (row.paymentMethod || '').replace('_', ' ')));
+    if (row.paymentNarration) td.appendChild(el('div', 'sub', row.paymentNarration));
+    td.appendChild(el('div', row.zohoPaid ? 'sub' : 'sub warn', row.zohoPaid ? 'Marked paid in Zoho' : 'Zoho payment not recorded yet (retried daily)'));
+  } else {
+    td.textContent = '—';
+  }
+  return td;
 }
 
 function remindersCell(count) {
@@ -693,44 +769,16 @@ function renderCycles(data) {
       if (cycle.invoiceNumber) quoteTd.appendChild(el('div', 'sub mono', 'Invoice ' + cycle.invoiceNumber));
       tr.appendChild(quoteTd);
 
-      const paymentTd = document.createElement('td');
-      if (cycle.status === 'paid') {
-        paymentTd.appendChild(el('div', 'mono', money(cycle.paymentAmount) + ' · ' + fmtDate(cycle.paymentDate)));
-        paymentTd.appendChild(el('div', 'sub', (cycle.paymentMethod || '').replace('_', ' ')));
-        if (cycle.paymentNarration) paymentTd.appendChild(el('div', 'sub', cycle.paymentNarration));
-      } else {
-        paymentTd.textContent = '—';
-      }
-      tr.appendChild(paymentTd);
+      tr.appendChild(paymentCell(cycle));
 
       tr.appendChild(remindersCell(cycle.remindersSent));
 
-      const actionsTd = document.createElement('td');
       if (cycle.status !== 'paid' && cycle.quoteNumber) {
-        const actions = el('div', 'row-actions');
-        const bankBtn = el('button', 'btn teal small', 'Paid through Yes Bank');
-        bankBtn.type = 'button';
-        const manualBtn = el('button', 'btn violet small', 'Record manual payment');
-        manualBtn.type = 'button';
-        bankBtn.onclick = () => {
-          const existing = actionsTd.querySelector('.payment-form');
-          if (existing) { existing.remove(); return; }
-          actionsTd.appendChild(yesBankForm(deal, cycle, data.cycle.today));
-        };
-        manualBtn.onclick = () => {
-          const existing = actionsTd.querySelector('.payment-form');
-          if (existing) { existing.remove(); return; }
-          actionsTd.appendChild(paymentForm(deal, cycle, data.cycle.today));
-        };
-        actions.appendChild(bankBtn);
-        actions.appendChild(manualBtn);
-        actionsTd.appendChild(actions);
-      } else if (cycle.status === 'paid') {
-        actionsTd.appendChild(el('div', 'sub', 'Settled'));
+        tr.appendChild(paymentActions(cycleTarget(deal, cycle), data.cycle.today));
       } else {
-        actionsTd.appendChild(el('div', 'sub', 'Waiting for the quote'));
-      }
-      tr.appendChild(actionsTd);
+        const actionsTd = document.createElement('td');
+        actionsTd.appendChild(el('div', 'sub', cycle.status === 'paid' ? 'Settled' : 'Waiting for the quote'));
+        }
 
       tbody.appendChild(tr);
     }
@@ -739,7 +787,7 @@ function renderCycles(data) {
 
   if (rows === 0) {
     const tr = document.createElement('tr');
-    const td = el('td', 'empty', 'No billing cycles yet. A quote goes out automatically at 11:00 IST on each client Next Renewal Date; a row appears here the moment it is sent, with Paid through Yes Bank and Record manual payment beside it.');
+    const td = el('td', 'empty', 'No billing cycles yet. A quote goes out automatically at 11:00 IST on each client Next Renewal Date; a row appears here the moment it is sent, with Mark paid by Yes Bank, Mark paid by Razorpay and Record manual payment beside it.');
     td.colSpan = 7;
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -775,6 +823,8 @@ function renderAdditions(data) {
     if (quote.issue) statusTd.appendChild(el('div', 'sub', quote.issue));
     tr.appendChild(statusTd);
 
+    tr.appendChild(paymentCell(quote));
+
     const deliveryTd = el('td', null,
       'WhatsApp ' + (quote.whatsappSent ? 'sent' : 'not sent') +
       ' · quote email ' + (quote.emailSent ? 'sent' : 'not sent') +
@@ -783,13 +833,21 @@ function renderAdditions(data) {
     if (quote.emailError) deliveryTd.appendChild(el('div', 'sub', quote.emailError));
     tr.appendChild(deliveryTd);
 
+    if (quote.status === 'payment_pending') {
+      tr.appendChild(paymentActions(additionTarget(quote), data.cycle.today));
+    } else {
+      const actionsTd = document.createElement('td');
+      actionsTd.appendChild(el('div', 'sub', quote.status === 'paid' ? 'Settled' : quote.status === 'failed' ? 'Quote failed' : 'Waiting for the quote'));
+      tr.appendChild(actionsTd);
+    }
+
     tbody.appendChild(tr);
   }
 
   if (data.additions.length === 0) {
     const tr = document.createElement('tr');
     const td = el('td', 'empty', 'No one-time quotes yet. Use the one-time quote column in the Clients table to send one.');
-    td.colSpan = 6;
+    td.colSpan = 8;
     tr.appendChild(td);
     tbody.appendChild(tr);
   }

@@ -37,6 +37,7 @@ export interface RenewalJob {
   payment_narration: string | null;
   payment_reference: string | null;
   hubspot_line_item_id: string | null;
+  zoho_payment_id: string | null; // Zoho customer payment recorded on the invoice; null = still to record
   estimate_email_sent: boolean;
   invoice_email_sent: boolean;
   email_error: string | null;
@@ -617,6 +618,17 @@ export async function saveHubspotLineItemId(
   }
 }
 
+export async function saveZohoPaymentId(supabase: SupabaseClient, jobId: string, paymentId: string): Promise<void> {
+  const { error } = await supabase
+    .from("renewal_jobs")
+    .update({ zoho_payment_id: paymentId, updated_at: new Date().toISOString() })
+    .eq("id", jobId);
+
+  if (error) {
+    throw new Error(`Failed to record Zoho payment on renewal_jobs: ${error.message}`);
+  }
+}
+
 // Paid cycles with any settlement step still outstanding. Re-run daily so a
 // manual payment (which has no Razorpay retries behind it) never stays
 // half-settled after a transient Zoho/Periskope/HubSpot failure.
@@ -626,7 +638,7 @@ export async function findPaidUnsettledJobs(supabase: SupabaseClient): Promise<R
     .select("*")
     .not("paid_at", "is", null)
     .or(
-      "invoice_step_status.neq.done,periskope_payment_confirmed_sent.is.false,invoice_email_sent.is.false,hubspot_renewal_done.is.false",
+      "invoice_step_status.neq.done,zoho_payment_id.is.null,periskope_payment_confirmed_sent.is.false,invoice_email_sent.is.false,hubspot_renewal_done.is.false",
     );
 
   if (error) {

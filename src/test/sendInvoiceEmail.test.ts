@@ -54,6 +54,7 @@ const paidJob = {
   payment_narration: null,
   payment_reference: "pay_1",
   hubspot_line_item_id: null,
+  zoho_payment_id: null,
   estimate_email_sent: true,
   invoice_email_sent: false,
   email_error: null,
