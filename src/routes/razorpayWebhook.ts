@@ -32,6 +32,15 @@ const paymentLinkPaidSchema = z.object({
 
 export const razorpayWebhookRouter = Router();
 
+// A non-2xx answer makes Razorpay redeliver the event, which is the retry
+// for a transient invoice / WhatsApp / email / HubSpot failure. The Zoho
+// payment step is owned by the daily sweep instead: it can stay broken for
+// days while a scope or permission is missing, and redeliveries for it
+// would only pile up.
+export function needsRedelivery(errors: string[]): boolean {
+  return errors.some((error) => !error.startsWith("zoho payment:"));
+}
+
 razorpayWebhookRouter.post(
   "/webhooks/razorpay",
   async (req: Request & { rawBody?: string }, res: Response) => {
@@ -79,7 +88,7 @@ razorpayWebhookRouter.post(
         );
         // Anything still outstanding -> non-2xx so Razorpay redelivers; the
         // retry is idempotent and only re-runs the unfinished steps.
-        res.status(result.errors.length ? 502 : 200).json({ received: true, processed: true, ...result });
+        res.status(needsRedelivery(result.errors) ? 502 : 200).json({ received: true, processed: true, ...result });
       } catch (err) {
         if (err instanceof SettlementInProgressError) {
           console.log(`[razorpayWebhook] deal ${job.hubspot_deal_id} -> settlement already in progress, asking Razorpay to retry`);
@@ -104,7 +113,7 @@ razorpayWebhookRouter.post(
             `WhatsApp ${result.whatsappSent ? "sent" : "not sent"}, email ${result.emailSent ? "sent" : "not sent"}` +
             (result.errors.length ? `; errors: ${result.errors.join("; ")}` : ""),
         );
-        res.status(result.errors.length ? 502 : 200).json({ received: true, processed: true, ...result });
+        res.status(needsRedelivery(result.errors) ? 502 : 200).json({ received: true, processed: true, ...result });
       } catch (err) {
         if (err instanceof SettlementInProgressError) {
           console.log(`[razorpayWebhook] one-time quote ${estimateNumber} -> settlement already in progress, asking Razorpay to retry`);

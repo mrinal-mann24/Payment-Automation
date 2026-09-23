@@ -126,6 +126,13 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-23 (webhook redelivery) — The Razorpay webhook now answers 200
+  when the Zoho payment step is the only thing outstanding (the daily
+  sweep retries that one); a 502 is kept for the other steps. First live
+  VPS run of the whole flow passed: QT-000514 → real test-card payment →
+  INV-10767, WhatsApp, both emails, HubSpot; duplicate delivery answered
+  as already paid. Only the Zoho payment (403 code 104003, Zoho Books
+  user role lacks Payments Received) is pending.
 - 2026-09-23 (Zoho paid + mark-paid buttons) — Every settlement now records
   a Zoho customer payment so the invoice shows Paid (`recordZohoPayment`,
   `zoho_payment_id` on both tables, migration 0012 applied live; the
