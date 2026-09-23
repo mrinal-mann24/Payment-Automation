@@ -618,7 +618,7 @@ the Razorpay link if paid outside Razorpay → `convertAdditionInvoice` →
 `recordAdditionZohoPayment` → WhatsApp confirmation → invoice email, each
 independent, errors collected, in-flight set, daily sweep. The admin page
 gives every unpaid one-time quote the same **Mark paid by Yes Bank / Mark
-paid by Razorpay / Record manual payment** buttons as a cycle
+paid by Razorpay** buttons as a cycle
 (`POST /admin/pricing/record-addition-payment`, same fields keyed by
 `chargeId`).
 
@@ -817,11 +817,13 @@ existing steps; there is no new table and no second state machine.
   quote. Summary strip: quoting today, renewal date needs fixing, needs
   HubSpot fix, no accountant email, unpaid cycles, one-time quotes.
   Billing-cycles table (unpaid rows plus any cycle started this month) with
-  **Mark paid by Yes Bank**, **Mark paid by Razorpay** and **Record manual
-  payment** (`POST /admin/pricing/record-payment`; the bank/manual ones
-  take the real payment date, which becomes HubSpot's Date Paid and the
-  Zoho payment date); a paid row says whether the Zoho payment is
-  recorded. The same three buttons sit beside every unpaid one-time quote. The Clients table shows and edits each
+  **Mark paid by Yes Bank** and **Mark paid by Razorpay** (`POST
+  /admin/pricing/record-payment`; the bank one takes the real payment
+  date, which becomes HubSpot's Date Paid and the Zoho payment date; the
+  route still accepts upi / neft / cheque / cash / other for a manual
+  entry by API, the page has no form for it — removed 2026-09-23 at the
+  business's request); a paid row says whether the Zoho payment is
+  recorded. The same two buttons sit beside every unpaid one-time quote. The Clients table shows and edits each
   deal's Accountant Email list in place (`POST
   /admin/pricing/accountant-email` with the list as typed → PATCH of the
   field joined with ", "; blank clears it; junk tokens such as "NA" are

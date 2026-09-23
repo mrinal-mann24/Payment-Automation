@@ -108,6 +108,8 @@ export const pricingAdminHtml = `<!doctype html>
   .btn.teal:hover:not(:disabled) { background: #0c5f59; }
   .btn.violet { background: #6d28d9; color: #fff; }
   .btn.violet:hover:not(:disabled) { background: #5b21b6; }
+  .btn.blue { background: #2563eb; color: #fff; }
+  .btn.blue:hover { background: #1d4ed8; }
   .btn.small { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
   .spin { width: 0.75rem; height: 0.75rem; border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: currentColor; border-radius: 50%; animation: spin 0.7s linear infinite; }
   .btn.secondary .spin { border-color: rgba(0, 0, 0, 0.15); border-top-color: currentColor; }
@@ -569,70 +571,6 @@ function formButtons(form, save, cancelLabel) {
   return buttons;
 }
 
-function paymentForm(target, today) {
-  const form = el('div', 'payment-form');
-  form.dataset.kind = 'manual';
-  const amount = document.createElement('input');
-  amount.type = 'number';
-  amount.min = '0';
-  amount.step = '0.01';
-  amount.className = 'mono';
-  amount.value = target.quoteTotal ?? '';
-  amount.placeholder = 'Amount';
-  const date = document.createElement('input');
-  date.type = 'date';
-  date.className = 'mono';
-  date.value = today;
-  date.max = today;
-  const method = document.createElement('select');
-  for (const [value, label] of [['upi', 'UPI'], ['neft', 'NEFT / IMPS / RTGS'], ['cheque', 'Cheque'], ['cash', 'Cash'], ['yes_bank', 'Yes Bank'], ['other', 'Other']]) {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = label;
-    method.appendChild(opt);
-  }
-  const narration = document.createElement('input');
-  narration.type = 'text';
-  narration.placeholder = 'Narration / description';
-  const reference = document.createElement('input');
-  reference.type = 'text';
-  reference.className = 'mono';
-  reference.placeholder = 'Reference (UTR etc.)';
-  const save = el('button', 'btn violet small', 'Save payment');
-  save.type = 'button';
-  const warn = el('div', 'warn full');
-
-  const checkAmount = () => {
-    const entered = Number(amount.value);
-    warn.textContent = target.quoteTotal !== null && Number.isFinite(entered) && entered !== Number(target.quoteTotal)
-      ? 'Amount differs from the quote total (' + money(target.quoteTotal) + '). It will still be marked PAID, and the Zoho invoice is settled in full.'
-      : '';
-  };
-  amount.oninput = checkAmount;
-
-  save.onclick = () => {
-    const entered = Number(amount.value);
-    if (!Number.isFinite(entered) || entered <= 0) { toast('err', 'Enter a valid amount', true); return; }
-    if (!date.value) { toast('err', 'Enter the payment date', true); return; }
-    submitPayment(target, save, 'Saving…', {
-      method: method.value,
-      amount: entered,
-      paymentDate: date.value,
-      narration: narration.value.trim(),
-      reference: reference.value.trim(),
-    });
-  };
-
-  form.appendChild(amount);
-  form.appendChild(date);
-  form.appendChild(method);
-  form.appendChild(narration);
-  form.appendChild(reference);
-  form.appendChild(warn);
-  form.appendChild(formButtons(form, save));
-  return form;
-}
-
 // "Mark paid by Yes Bank" asks for the real payment date: the accountant
 // often sees the transfer a day or two later, and HubSpot's Date Paid and
 // the Zoho payment must carry the day the money actually arrived.
@@ -685,7 +623,7 @@ function razorpayForm(target) {
   return form;
 }
 
-// The three buttons beside every unpaid cycle and one-time quote.
+// The two buttons beside every unpaid cycle and one-time quote.
 function paymentActions(target, today) {
   const td = document.createElement('td');
   const actions = el('div', 'row-actions');
@@ -702,15 +640,11 @@ function paymentActions(target, today) {
   bankBtn.onclick = toggle('yes_bank', () => yesBankForm(target, today));
   actions.appendChild(bankBtn);
   if (target.hasLink) {
-    const razorpayBtn = el('button', 'btn small', 'Mark paid by Razorpay');
+    const razorpayBtn = el('button', 'btn blue small', 'Mark paid by Razorpay');
     razorpayBtn.type = 'button';
     razorpayBtn.onclick = toggle('razorpay', () => razorpayForm(target));
     actions.appendChild(razorpayBtn);
   }
-  const manualBtn = el('button', 'btn violet small', 'Record manual payment');
-  manualBtn.type = 'button';
-  manualBtn.onclick = toggle('manual', () => paymentForm(target, today));
-  actions.appendChild(manualBtn);
   td.appendChild(actions);
   return td;
 }
@@ -787,7 +721,7 @@ function renderCycles(data) {
 
   if (rows === 0) {
     const tr = document.createElement('tr');
-    const td = el('td', 'empty', 'No billing cycles yet. A quote goes out automatically at 11:00 IST on each client Next Renewal Date; a row appears here the moment it is sent, with Mark paid by Yes Bank, Mark paid by Razorpay and Record manual payment beside it.');
+    const td = el('td', 'empty', 'No billing cycles yet. A quote goes out automatically at 11:00 IST on each client Next Renewal Date; a row appears here the moment it is sent, with Mark paid by Yes Bank and Mark paid by Razorpay beside it.');
     td.colSpan = 7;
     tr.appendChild(td);
     tbody.appendChild(tr);

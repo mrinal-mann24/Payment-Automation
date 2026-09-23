@@ -126,6 +126,13 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-23 (two buttons) — "Record manual payment" removed from the
+  admin page at the business's request; each unpaid cycle and one-time
+  quote now has just **Mark paid by Yes Bank** (teal) and **Mark paid by
+  Razorpay** (blue). The API route keeps accepting the other methods.
+  Verified live in Zoho that INV-10768 is still "sent" with its full
+  balance: the only failing step is the Zoho customer payment (403
+  code 104003, Zoho Books role lacks Payments Received).
 - 2026-09-23 (webhook redelivery) — The Razorpay webhook now answers 200
   when the Zoho payment step is the only thing outstanding (the daily
   sweep retries that one); a 502 is kept for the other steps. First live

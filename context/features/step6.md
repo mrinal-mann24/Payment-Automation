@@ -30,13 +30,14 @@ unchanged for yearly customers and deals with no usable line item.
   through Zoho Books' own email API to every address in the deal's
   **Accountant Email** field (comma-separated list) — only when at least
   one is set; no fallback to the contact.
-- **Marking paid (2026-09-23):** "Mark paid by Yes Bank" (date +
-  narration), "Record manual payment" (amount, date, method, narration,
-  reference) and "Mark paid by Razorpay" — for a webhook that never
+- **Marking paid (2026-09-23):** two buttons — "Mark paid by Yes Bank"
+  (date + narration) and "Mark paid by Razorpay" (for a webhook that never
   arrived: accepted only when Razorpay itself shows the link as paid, with
-  the payment id, amount and date taken from Razorpay. All three settle
-  exactly like a webhook payment; the date entered becomes HubSpot's Date
-  Paid. The same three buttons sit beside every unpaid one-time quote.
+  the payment id, amount and date taken from Razorpay). Both settle exactly
+  like a webhook payment; the date entered becomes HubSpot's Date Paid. The
+  same two buttons sit beside every unpaid one-time quote. The "Record
+  manual payment" form was removed the same day (not required); the API
+  still takes other methods.
 - **Zoho shows the invoice as Paid (2026-09-23):** every settlement records
   a Zoho customer payment for the invoice's full balance (bank transfer for
   Yes Bank / NEFT, cheque, cash, "others" for Razorpay / UPI / other, the
