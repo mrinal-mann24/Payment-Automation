@@ -126,6 +126,14 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-23 (pause switch + sender) — Per-client **Auto quote** switch on
+  the admin page (`client_pricing.auto_quote`, migration 0013 applied
+  live; `base_price` now nullable): paused clients are skipped by the
+  daily run, refused (409) by the on-demand route and skipped by the
+  legacy cron. Emails are sent with `send_from_org_email_id: true` so
+  they come from the Zoho org email — accounts@aiaccountant.com must be
+  set and verified in Zoho Books. Sahil <> VA is "Not billed" because
+  its line item is a yearly term (P1Y), by design. 210/210.
 - 2026-09-23 (two buttons) — "Record manual payment" removed from the
   admin page at the business's request; each unpaid cycle and one-time
   quote now has just **Mark paid by Yes Bank** (teal) and **Mark paid by

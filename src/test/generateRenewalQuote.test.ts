@@ -3,9 +3,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 vi.mock("../clients/hubspot.js", () => ({ fetchVaDealsWithLineItems: vi.fn() }));
 vi.mock("../jobs/renewalPipeline.js", () => ({ runRenewalPipeline: vi.fn() }));
+vi.mock("../repositories/clientPricing.js", () => ({ findClientPricing: vi.fn() }));
 
 import { fetchVaDealsWithLineItems, type HubspotLineItem, type VaDealWithLineItems } from "../clients/hubspot.js";
 import { runRenewalPipeline } from "../jobs/renewalPipeline.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { generateRenewalQuote, QuoteNotDueError } from "../jobs/generateRenewalQuote.js";
 
 const fakeSupabase = {} as SupabaseClient;
@@ -46,6 +48,7 @@ beforeEach(() => {
     deal("yearly", "2026-10-01", [item({ billingPeriodTerm: "P1Y" })]),
     deal("seven-month", "2026-10-01", [item({ billingPeriodTerm: "P7M", quantity: 7, price: 3986 })]),
   ]);
+  vi.mocked(findClientPricing).mockResolvedValue(null);
   vi.mocked(runRenewalPipeline).mockResolvedValue({
     billingPeriod: "x",
     zohoEstimateId: "zest-1",
@@ -72,6 +75,24 @@ describe("generateRenewalQuote (POST /webhooks/renewal)", () => {
 
     expect(outcome.kind).toBe("cycle");
     expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-08-10", months: 3, amount: 21000 });
+  });
+
+  it("refuses a client whose auto quote is switched off on the admin page, even when due", async () => {
+    vi.mocked(findClientPricing).mockResolvedValue({
+      id: "pricing-1",
+      hubspot_deal_id: "monthly-due",
+      deal_name: null,
+      base_price: 5000,
+      auto_quote: false,
+      created_at: "2026-09-23T00:00:00Z",
+      updated_at: "2026-09-23T00:00:00Z",
+    });
+
+    await expect(generateRenewalQuote(fakeSupabase, "monthly-due", oct1)).rejects.toMatchObject({
+      name: "QuoteNotDueError",
+      message: expect.stringMatching(/paused/),
+    });
+    expect(runRenewalPipeline).not.toHaveBeenCalled();
   });
 
   it("refuses a client whose date is still ahead, or who has no date", async () => {

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchVaDealsWithLineItems } from "../clients/hubspot.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { billingCycleFrom, istToday } from "../utils/billingCycle.js";
 import { classifyDeal, type DealClassification } from "../utils/monthlyEligibility.js";
 import { runRenewalPipeline, type RenewalPipelineResult } from "./renewalPipeline.js";
@@ -29,6 +30,12 @@ export async function generateRenewalQuote(
   const listed = (await fetchVaDealsWithLineItems()).find((deal) => deal.dealId === dealId);
   if (!listed) {
     throw new QuoteNotDueError(`deal ${dealId} is not in the active VA deal list`);
+  }
+
+  // The admin's switch applies here too, so a paused client is never quoted by accident.
+  const pricing = await findClientPricing(supabase, dealId);
+  if (pricing && !pricing.auto_quote) {
+    throw new QuoteNotDueError(`automatic quotes are paused for deal ${dealId} on the admin page; switch them back on to quote`);
   }
 
   const classification = classifyDeal(listed, istToday(now));

@@ -535,6 +535,14 @@ same deal reset to `base_price=30, addition_price=0`; re-running
 the addition amount sent moments earlier via `/admin/pricing/send-addition`
 was correctly *not* included.
 
+**Added 2026-09-23 (migration `0013`)**: `client_pricing.auto_quote`
+(boolean, default true) is the admin's per-client switch — false means
+neither the 11:00 IST run nor `POST /webhooks/renewal` (409) nor the
+legacy cron quotes the client until it is switched back on
+(`setAutoQuote`, `findPausedDealIds`). Because a client can be paused
+before it has a price, `base_price` is now nullable; a monthly cycle
+still refuses to bill without one.
+
 ### 3.7c Addition charges + pricing admin interface (added 2026-07-31)
 One-off charges (e.g. a monthly site-visit fee) billed **separately**
 from the renewal cycle — own Zoho quote, own Razorpay link, own WhatsApp
@@ -829,6 +837,15 @@ existing steps; there is no new table and no second state machine.
   field joined with ", "; blank clears it; junk tokens such as "NA" are
   shown as ignored). One-time quote column and "One-time quotes" table
   — see §3.7c. Still unauthenticated — business decision.
+- **Pause switch and sender (2026-09-23)**: the Clients table has an
+  **Auto quote** column (On / Paused, Pause / Resume button →
+  `POST /admin/pricing/auto-quote`); a paused client shows "Paused — no
+  quote goes out until Auto quote is switched back on", is never "due"
+  and is counted in the Paused stat. Quote and invoice emails are sent
+  with `send_from_org_email_id: true`, i.e. from the Zoho Books
+  organisation email — the business wants **accounts@aiaccountant.com**,
+  which must be set and verified as the org's sender address in Zoho
+  Books (and the domain's SPF/DKIM must allow Zoho to send for it).
 - **Timezone**: every date goes through `src/utils/billingCycle.ts`
   (fixed +05:30 arithmetic on UTC getters). HubSpot's epoch-ms dates are
   calendar dates and are never shifted; Razorpay `created_at` (seconds) is

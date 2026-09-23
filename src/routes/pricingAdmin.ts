@@ -11,7 +11,7 @@ import {
 } from "../clients/hubspot.js";
 import { fetchPaymentLink } from "../clients/razorpay.js";
 import { findAdditionChargeById, listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
-import { upsertClientPricing } from "../repositories/clientPricing.js";
+import { setAutoQuote, upsertClientPricing } from "../repositories/clientPricing.js";
 import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
 import { createAdditionCharge } from "../steps/createAdditionCharge.js";
 import { settleAdditionPayment } from "../steps/settleAdditionPayment.js";
@@ -57,8 +57,9 @@ function cycleView(job: RenewalJob) {
 }
 
 // How the deal is billed, when its next quote goes (the deal's Next Renewal
-// Date) and whether that cycle already has a row.
-function billingView(classification: DealClassification, today: string, jobs: RenewalJob[]) {
+// Date), whether that cycle already has a row, and whether the admin has
+// paused it (a paused client is never "due").
+function billingView(classification: DealClassification, today: string, jobs: RenewalJob[], paused: boolean) {
   if (classification.kind !== "cycle") {
     return {
       kind: classification.kind,
@@ -70,6 +71,22 @@ function billingView(classification: DealClassification, today: string, jobs: Re
       amount: null,
       quoted: false,
       daysOverdue: null,
+      paused,
+    };
+  }
+  const quoted = classification.periodStart !== null && jobs.some((job) => job.billing_period === classification.periodStart);
+  if (paused) {
+    return {
+      kind: "cycle",
+      label: cycleLabel(classification.months),
+      months: classification.months,
+      due: false,
+      reason: "Automatic quotes are paused on this page",
+      periodStart: classification.periodStart,
+      amount: classification.amount,
+      quoted,
+      daysOverdue: null,
+      paused: true,
     };
   }
   return {
@@ -80,8 +97,9 @@ function billingView(classification: DealClassification, today: string, jobs: Re
     reason: classification.due ? null : classification.reason,
     periodStart: classification.periodStart,
     amount: classification.amount,
-    quoted: classification.periodStart !== null && jobs.some((job) => job.billing_period === classification.periodStart),
+    quoted,
     daysOverdue: classification.due ? daysBetween(classification.periodStart, today) : null,
+    paused: false,
   };
 }
 
@@ -151,12 +169,15 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
 
     const result = deals.map((deal) => {
       const dealJobs = jobsByDealId.get(deal.dealId) ?? [];
+      const pricing = pricingByDealId.get(deal.dealId);
+      const paused = pricing ? pricing.auto_quote === false : false;
       return {
         dealId: deal.dealId,
         dealName: deal.dealName,
         dealStage: deal.dealStage,
-        basePrice: pricingByDealId.get(deal.dealId)?.base_price ?? null,
-        billing: billingView(classifyDeal(deal, today), today, dealJobs),
+        basePrice: pricing?.base_price ?? null,
+        autoQuote: !paused,
+        billing: billingView(classifyDeal(deal, today), today, dealJobs, paused),
         email: emailView(emails.get(deal.dealId)),
         cycles: dealJobs.map(cycleView),
       };
@@ -194,6 +215,31 @@ pricingAdminRouter.post("/admin/pricing/base-price", async (req: Request, res: R
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: "Failed to save base price", details: message });
+  }
+});
+
+// Pause / resume a client's automatic quotes (the 11:00 IST run and the
+// on-demand route both honour it).
+const autoQuoteSchema = z.object({
+  dealId: z.string().min(1),
+  enabled: z.boolean(),
+  dealName: z.string().optional(),
+});
+
+pricingAdminRouter.post("/admin/pricing/auto-quote", async (req: Request, res: Response) => {
+  const parsed = autoQuoteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    await setAutoQuote(getSupabaseClient(), parsed.data.dealId, parsed.data.enabled, parsed.data.dealName);
+    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> automatic quotes ${parsed.data.enabled ? "resumed" : "paused"}`);
+    res.status(200).json({ ok: true, enabled: parsed.data.enabled });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to save the auto-quote setting", details: message });
   }
 });
 

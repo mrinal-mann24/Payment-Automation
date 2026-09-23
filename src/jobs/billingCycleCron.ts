@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "../clients/supabase.js";
 import { fetchVaDealsWithLineItems, type VaDealWithLineItems } from "../clients/hubspot.js";
+import { findPausedDealIds } from "../repositories/clientPricing.js";
 import { findOpenLegacyJob } from "../repositories/renewalJobs.js";
 import { classifyDeal, type DealClassification } from "../utils/monthlyEligibility.js";
 import { billingCycleFrom, daysBetween, istToday, type BillingCycle } from "../utils/billingCycle.js";
@@ -12,6 +13,7 @@ export interface ClassifiedDeal extends VaDealWithLineItems {
 export interface ClassifiedVaDeals {
   today: string; // IST date of the tick
   deals: ClassifiedDeal[];
+  paused: Set<string>; // deals whose automatic quotes the admin switched off
 }
 
 // A quote goes out on the client's Next Renewal Date and a missed tick is
@@ -31,9 +33,10 @@ function sleep(ms: number): Promise<void> {
 // never disagree about which deals the cycles own.
 export async function classifyVaDeals(now: Date = new Date()): Promise<ClassifiedVaDeals> {
   const today = istToday(now);
-  const deals = await fetchVaDealsWithLineItems();
+  const [deals, paused] = await Promise.all([fetchVaDealsWithLineItems(), findPausedDealIds(getSupabaseClient())]);
   return {
     today,
+    paused,
     deals: deals.map((deal) => ({ ...deal, classification: classifyDeal(deal, today) })),
   };
 }
@@ -66,13 +69,17 @@ export async function runBillingCycleCheck(
   classified: ClassifiedVaDeals,
   options: { pauseMs?: number } = {},
 ): Promise<void> {
-  const { today, deals } = classified;
+  const { today, deals, paused } = classified;
   const pauseMs = options.pauseMs ?? DEFAULT_PAUSE_MS;
   const supabase = getSupabaseClient();
   console.log(`[billingCycle] ${today}: checking ${deals.length} active VA deal(s)`);
 
   let attempted = 0;
   for (const deal of deals) {
+    if (paused.has(deal.dealId)) {
+      console.log(`[billingCycle] deal ${deal.dealId} (${deal.dealName}) -> skipped: automatic quotes are paused on the admin page`);
+      continue;
+    }
     const { cycle, reason } = cycleToGenerate(deal.classification, today);
     if (!cycle) {
       console.log(`[billingCycle] deal ${deal.dealId} (${deal.dealName}) -> skipped: ${reason}`);

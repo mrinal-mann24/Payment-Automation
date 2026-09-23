@@ -84,9 +84,10 @@ export async function createZohoEstimate(
     // flow (src/steps/createAdditionCharge.ts), never folded into the
     // renewal total.
     const pricing = await findClientPricing(supabase, dealId);
-    if (cycle && cycle.amount === null && !pricing) {
+    const basePrice = pricing?.base_price ?? null;
+    if (cycle && cycle.amount === null && basePrice === null) {
       throw new Error(
-        `No client_pricing row for deal ${dealId}; refusing to guess a price for monthly cycle ${cycle.key}`,
+        `No base price in client_pricing for deal ${dealId}; refusing to guess a price for monthly cycle ${cycle.key}`,
       );
     }
 
@@ -97,9 +98,9 @@ export async function createZohoEstimate(
       // client_pricing base price.
       dealForEstimate = {
         ...deal,
-        lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price: cycle.amount ?? pricing!.base_price }],
+        lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price: cycle.amount ?? basePrice! }],
       };
-    } else if (pricing) {
+    } else if (basePrice !== null) {
       const firstLineItem = deal.lineItems[0];
       dealForEstimate = {
         ...deal,
@@ -108,7 +109,7 @@ export async function createZohoEstimate(
             id: firstLineItem?.id ?? "",
             name: firstLineItem?.name ?? deal.dealName,
             quantity: firstLineItem?.quantity ?? 1,
-            price: pricing.base_price,
+            price: basePrice,
           },
         ],
       };

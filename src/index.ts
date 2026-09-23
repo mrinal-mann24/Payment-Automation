@@ -28,13 +28,15 @@ cron.schedule("0 11 * * *", async () => {
   }
 
   if (classified) {
-    const cycleDealIds = new Set(
-      classified.deals.filter((deal) => isBilledByCycles(deal.classification)).map((deal) => deal.dealId),
-    );
+    // The legacy cron skips every deal a cycle owns and every deal the admin paused.
+    const skipDealIds = new Set([
+      ...classified.deals.filter((deal) => isBilledByCycles(deal.classification)).map((deal) => deal.dealId),
+      ...classified.paused,
+    ]);
     await runBillingCycleCheck(classified).catch((err) => {
       console.error("[billingCycle] run failed:", err);
     });
-    await runRenewalCheck(cycleDealIds, now).catch((err) => {
+    await runRenewalCheck(skipDealIds, now).catch((err) => {
       console.error("[renewalCron] run failed:", err);
     });
   }

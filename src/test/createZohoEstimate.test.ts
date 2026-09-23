@@ -228,6 +228,7 @@ const pricingRow = {
   hubspot_deal_id: "deal-1",
   deal_name: "Renewal",
   base_price: 5000,
+  auto_quote: true,
   created_at: "2026-07-31T00:00:00Z",
   updated_at: "2026-07-31T00:00:00Z",
 };
@@ -255,6 +256,16 @@ describe("createZohoEstimate with a monthly billing cycle", () => {
     });
     expect(addLineItemToDeal).not.toHaveBeenCalled();
     expect(result).toMatchObject({ zohoEstimateNumber: "QT-9", billingPeriod: "2026-10" });
+  });
+
+  it("refuses to bill a monthly cycle when the pricing row holds only a pause setting and no base price", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
+    vi.mocked(findClientPricing).mockResolvedValue({ ...pricingRow, base_price: null });
+
+    await expect(createZohoEstimate(fakeSupabase, "deal-1", octoberCycle)).rejects.toThrow(/client_pricing/);
+
+    expect(createEstimate).not.toHaveBeenCalled();
   });
 
   it("refuses to bill a monthly cycle with no client_pricing row rather than guessing a price", async () => {

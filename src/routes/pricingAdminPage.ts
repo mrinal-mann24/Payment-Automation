@@ -171,6 +171,7 @@ export const pricingAdminHtml = `<!doctype html>
             <th style="min-width:200px">Deal</th>
             <th style="width:130px">Stage</th>
             <th style="min-width:250px">Billing</th>
+            <th style="width:150px">Auto quote</th>
             <th style="width:300px">Accountant emails</th>
             <th style="width:230px">Base price / month</th>
             <th style="min-width:460px">One-time quote</th>
@@ -346,12 +347,14 @@ function renderStats(data) {
   }
   const cycles = deals.flatMap((d) => d.cycles);
   const unpaid = cycles.filter((c) => c.status !== 'paid').length;
+  const paused = deals.filter((d) => !d.autoQuote).length;
 
   const stats = [
     ['Active clients', deals.length, '', 'in the VA pipeline'],
     ['Monthly', monthly, '', 'quoted on their Next Renewal Date'],
     ['Multi-month cycles', term, '', 'quarterly, half-yearly or any other term'],
     ['Quoting today', quotingToday, quotingToday ? 'good' : '', 'the 11:00 IST run sends these'],
+    ['Paused', paused, paused ? 'warn' : 'good', 'automatic quotes switched off'],
     ['Renewal date needs fixing', datePassed, datePassed ? 'warn' : 'good', 'missing or passed without a quote'],
     ['Needs HubSpot fix', attention, attention ? 'bad' : 'good', 'no usable line item'],
     ['No accountant email', noEmail, noEmail ? 'warn' : 'good', 'these clients get WhatsApp only'],
@@ -374,6 +377,10 @@ function billingCell(deal) {
   const b = deal.billing;
   const badgeClass = b.kind === 'cycle' ? (b.months === 1 ? 'monthly' : 'term') : 'other';
   td.appendChild(el('span', 'badge ' + badgeClass, b.label));
+  if (b.paused && b.kind === 'cycle') {
+    td.appendChild(el('div', 'sub warn', 'Paused — no quote goes out until Auto quote is switched back on'));
+    return td;
+  }
   if (b.kind !== 'cycle') {
     td.appendChild(el('div', 'sub', b.reason));
     return td;
@@ -390,6 +397,32 @@ function billingCell(deal) {
   } else {
     td.appendChild(el('div', 'sub warn', 'Next Renewal Date ' + fmtDate(b.periodStart) + ' passed ' + b.daysOverdue + ' days ago without a quote — update it in HubSpot'));
   }
+  return td;
+}
+
+// The admin's switch: Pause stops the 11:00 IST run (and the on-demand
+// route) quoting this client until Resume.
+function autoQuoteCell(deal) {
+  const td = document.createElement('td');
+  const row = el('div', 'field-row');
+  row.appendChild(el('span', 'badge ' + (deal.autoQuote ? 'paid' : 'failed'), deal.autoQuote ? 'On' : 'Paused'));
+  const btn = el('button', 'btn secondary small', deal.autoQuote ? 'Pause' : 'Resume');
+  btn.type = 'button';
+  btn.onclick = async () => {
+    const enabled = !deal.autoQuote;
+    const done = busy(btn, 'Saving');
+    try {
+      await postJson('/admin/pricing/auto-quote', { dealId: deal.dealId, enabled, dealName: deal.dealName });
+      toast('ok', deal.dealName + ': automatic quotes ' + (enabled ? 'resumed' : 'paused — nothing is sent until you resume'));
+      await loadDeals();
+    } catch (err) {
+      toast('err', deal.dealName + ': ' + err.message, true);
+      done();
+    }
+  };
+  row.appendChild(btn);
+  td.appendChild(row);
+  td.appendChild(el('div', 'sub', deal.autoQuote ? 'Quotes go out automatically' : 'Nothing is sent for this client'));
   return td;
 }
 
@@ -445,6 +478,7 @@ function renderDeals(data) {
 
     tr.appendChild(el('td', null, stageName(deal.dealStage)));
     tr.appendChild(billingCell(deal));
+    tr.appendChild(autoQuoteCell(deal));
     tr.appendChild(emailCell(deal));
 
     const priceTd = document.createElement('td');

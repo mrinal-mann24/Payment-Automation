@@ -382,21 +382,23 @@ export interface ZohoEmail {
   body: string;
 }
 
-// Zoho emails the document itself (sender and PDF attachment follow the
-// org's email settings). `body` is the message text — the Razorpay link has
-// to be put there by the caller, Zoho's own templates know nothing about
-// it. Covered by the estimates.CREATE / invoices.CREATE scopes.
+// Zoho emails the document itself, from the organisation's email address
+// (send_from_org_email_id — the business wants accounts@aiaccountant.com,
+// which must be set and verified as the org email in Zoho Books; decision
+// 2026-09-23). `body` is the message text — the Razorpay link has to be
+// put there by the caller, Zoho's own templates know nothing about it.
+// Covered by the estimates.CREATE / invoices.CREATE scopes.
 export async function emailEstimate(estimateId: string, email: ZohoEmail): Promise<void> {
   await zohoFetch(`/estimates/${estimateId}/email?organization_id=${config.zoho.orgId}`, {
     method: "POST",
-    body: JSON.stringify({ to_mail_ids: email.to, subject: email.subject, body: email.body }),
+    body: JSON.stringify({ to_mail_ids: email.to, subject: email.subject, body: email.body, send_from_org_email_id: true }),
   });
 }
 
 export async function emailInvoice(invoiceId: string, email: ZohoEmail): Promise<void> {
   await zohoFetch(`/invoices/${invoiceId}/email?organization_id=${config.zoho.orgId}`, {
     method: "POST",
-    body: JSON.stringify({ to_mail_ids: email.to, subject: email.subject, body: email.body }),
+    body: JSON.stringify({ to_mail_ids: email.to, subject: email.subject, body: email.body, send_from_org_email_id: true }),
   });
 }
 

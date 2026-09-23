@@ -53,6 +53,12 @@ unchanged for yearly customers and deals with no usable line item.
   an optional narration and sends a quote (service bold, narration beneath)
   to the group and by email; paid through its Razorpay link; invoice
   confirmed to the group and emailed.
+- **Pause switch (2026-09-23):** the admin can switch a client's automatic
+  quotes off and on (`client_pricing.auto_quote`); while off, nothing is
+  quoted for that client by the daily run, the on-demand route or the
+  legacy cron.
+- **Sender (2026-09-23):** quote and invoice emails go out from the Zoho
+  organisation email, to be set to accounts@aiaccountant.com in Zoho.
 - **Admin auth:** left open (business decision, see `ARCHITECTURE.md` §3.7c).
 
 ## 2. Requirements (EARS)
@@ -65,8 +71,8 @@ unchanged for yearly customers and deals with no usable line item.
   WhatsApp group message with the quote PDF, and — when the Accountant
   Email is set — a Zoho email.
 - REQ-6.2 The system SHALL NOT auto-quote a deal whose Next Renewal Date is
-  blank, in the future, or passed four or more days ago, or a deal with
-  an unpaid legacy quote; the legacy cron SHALL skip every deal a cycle
+  blank, in the future, or passed four or more days ago, a deal with
+  an unpaid legacy quote, or a deal the admin has paused; the legacy cron SHALL skip every deal a cycle
   owns. `POST /webhooks/renewal` SHALL quote any due deal regardless of
   the window and refuse (409) a not-due or unlisted one.
 - REQ-6.3 A cycle is PAID ⇔ `renewal_jobs.paid_at` is set. Razorpay

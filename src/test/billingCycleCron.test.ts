@@ -4,10 +4,12 @@ vi.mock("../clients/supabase.js", () => ({ getSupabaseClient: () => ({}) }));
 vi.mock("../clients/hubspot.js", () => ({ fetchVaDealsWithLineItems: vi.fn() }));
 vi.mock("../jobs/renewalPipeline.js", () => ({ runRenewalPipeline: vi.fn() }));
 vi.mock("../repositories/renewalJobs.js", () => ({ findOpenLegacyJob: vi.fn() }));
+vi.mock("../repositories/clientPricing.js", () => ({ findPausedDealIds: vi.fn() }));
 
 import { fetchVaDealsWithLineItems, type HubspotLineItem, type VaDealWithLineItems } from "../clients/hubspot.js";
 import { runRenewalPipeline } from "../jobs/renewalPipeline.js";
 import { findOpenLegacyJob } from "../repositories/renewalJobs.js";
+import { findPausedDealIds } from "../repositories/clientPricing.js";
 import { classifyVaDeals, isBilledByCycles, runBillingCycleCheck } from "../jobs/billingCycleCron.js";
 
 const item = (overrides: Partial<HubspotLineItem> = {}): HubspotLineItem => ({
@@ -53,6 +55,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchVaDealsWithLineItems).mockResolvedValue(deals);
   vi.mocked(findOpenLegacyJob).mockResolvedValue(null);
+  vi.mocked(findPausedDealIds).mockResolvedValue(new Set());
   vi.mocked(runRenewalPipeline).mockResolvedValue({
     billingPeriod: "2026-10-01",
     zohoEstimateId: "zest-1",
@@ -102,6 +105,16 @@ describe("runBillingCycleCheck", () => {
       ["quarterly-today", "2026-10-01", 3, 39000],
       ["seven-month", "2026-10-01", 7, 27902],
     ]);
+  });
+
+  it("never quotes a client whose auto quote is switched off on the admin page", async () => {
+    vi.mocked(findPausedDealIds).mockResolvedValue(new Set(["due-2", "quarterly-today"]));
+
+    const classified = await classifyVaDeals(istTick(1));
+    await runBillingCycleCheck(classified, { pauseMs: 0 });
+
+    expect(classified.paused).toEqual(new Set(["due-2", "quarterly-today"]));
+    expect(generated().map((g) => g[0])).toEqual(["due-1", "seven-month"]);
   });
 
   it("quotes a client on their own date, whatever day of the month it is", async () => {
