@@ -9,9 +9,10 @@ export type CycleMonths = number; // 1–11: any whole number of months under a 
 // line item's own dates play no part.
 //
 //   cycle        any term under a year (P1M, P3M, P6M, P7M …) — quoted on
-//                the Next Renewal Date for that many months: monthly at the
-//                client_pricing base price (amount null), longer terms at
-//                what the client paid last time (latest price × quantity)
+//                the Next Renewal Date for that many months, at the line
+//                item's unit price × quantity; amount is null only when
+//                the line item has no price, and the client_pricing base
+//                price is then the fallback (decision 2026-09-28)
 //   none         a year or longer, no usable term, no dated line item,
 //                unreadable — left to the legacy due-date flow
 export type DealClassification =
@@ -45,6 +46,24 @@ function realDate(value: string | null): string | null {
   return value && value >= "2000-01-01" ? value : null;
 }
 
+// The line item that times and prices a deal: the recurring one (it has a
+// billing start date and a usable term) with the latest billing start
+// date. One-time and undated items are ignored, however recent.
+export function latestRecurringLineItem<T extends Pick<HubspotLineItem, "billingStartDate" | "billingPeriodTerm">>(
+  lineItems: T[],
+): T | null {
+  let latest: T | null = null;
+  for (const item of lineItems) {
+    if (!item.billingStartDate || termMonths(item.billingPeriodTerm) === null) {
+      continue;
+    }
+    if (latest === null || item.billingStartDate > latest.billingStartDate!) {
+      latest = item;
+    }
+  }
+  return latest;
+}
+
 // `today` is the IST date (YYYY-MM-DD) of the tick or request.
 export function classifyDeal(
   deal: Pick<VaDealWithLineItems, "lineItems" | "lineItemsError" | "nextRenewalDate">,
@@ -54,26 +73,23 @@ export function classifyDeal(
     return { kind: "none", reason: `line items could not be read: ${deal.lineItemsError}` };
   }
 
-  const dated = deal.lineItems.filter((item) => item.billingTermEndDate);
-  if (dated.length === 0) {
-    return { kind: "none", reason: "no line item has a billing end date" };
+  const latest = latestRecurringLineItem(deal.lineItems);
+  if (!latest) {
+    const terms = [...new Set(deal.lineItems.filter((item) => item.billingStartDate).map((item) => item.billingPeriodTerm ?? "not set"))];
+    return {
+      kind: "none",
+      reason: `no line item has a billing start date and a usable term${terms.length ? ` (terms seen: ${terms.join(", ")})` : ""}`,
+    };
   }
-
-  const latestEnd = dated.reduce(
-    (max, item) => (item.billingTermEndDate! > max ? item.billingTermEndDate! : max),
-    "",
+  const sameStart = deal.lineItems.filter(
+    (item) => item.billingStartDate === latest.billingStartDate && termMonths(item.billingPeriodTerm) !== null,
   );
-  const latestItems = dated.filter((item) => item.billingTermEndDate === latestEnd);
-  const latest = latestItems[0]!;
-  if (latestItems.some((item) => (item.billingPeriodTerm ?? "") !== (latest.billingPeriodTerm ?? ""))) {
-    return { kind: "none", reason: `latest line items (ending ${latestEnd}) disagree on term` };
+  if (sameStart.some((item) => item.billingPeriodTerm !== latest.billingPeriodTerm)) {
+    return { kind: "none", reason: `latest line items (starting ${latest.billingStartDate}) disagree on term` };
   }
 
   const term = latest.billingPeriodTerm ?? "not set";
-  const termLength = termMonths(latest.billingPeriodTerm);
-  if (termLength === null) {
-    return { kind: "none", reason: `latest line item has no usable term (${term})` };
-  }
+  const termLength = termMonths(latest.billingPeriodTerm)!;
   // The quantity is a number of months too (decision 2026-09-22: a
   // monthly-term item with quantity 3 is a 3-month cycle); the team also
   // enters a 7-month term as P7M × 7, so the cycle is the longer of the two.
@@ -91,7 +107,7 @@ export function classifyDeal(
   const base = {
     kind: "cycle" as const,
     months,
-    amount: months === 1 ? null : latest.price * latest.quantity,
+    amount: latest.price > 0 ? latest.price * latest.quantity : null,
     latest,
   };
   const next = realDate(deal.nextRenewalDate);

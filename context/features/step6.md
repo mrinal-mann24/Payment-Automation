@@ -14,8 +14,9 @@ unchanged for yearly customers and deals with no usable line item.
   stays on the legacy due-date flow.
 - **Quote date from the deal's Next Renewal Date.** A client is quoted on
   HubSpot's `next_renewal_date`, for one cycle length from that day, at the
-  `client_pricing` base price (monthly) or what they paid last time (terms:
-  latest line item price × quantity). A missed tick is retried for three
+  HubSpot price: unit price × quantity of the recurring line item with the
+  latest billing start date. The `client_pricing` base price is only the
+  fallback when HubSpot has no price (decision 2026-09-28). A missed tick is retried for three
   days; anything older is flagged on the admin page and never auto-quoted —
   the team corrects the date in HubSpot. Blank or `1970-01-01` = never due.
 - **After payment the automation moves Next Renewal Date forward** by the

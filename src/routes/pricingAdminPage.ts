@@ -173,7 +173,7 @@ export const pricingAdminHtml = `<!doctype html>
             <th style="min-width:250px">Billing</th>
             <th style="width:150px">Auto quote</th>
             <th style="width:300px">Accountant emails</th>
-            <th style="width:230px">Base price / month</th>
+            <th style="width:230px">Base price / month (fallback)</th>
             <th style="min-width:460px">One-time quote</th>
           </tr>
         </thead>
@@ -386,7 +386,13 @@ function billingCell(deal) {
     td.appendChild(el('div', 'sub', b.reason));
     return td;
   }
-  if (b.months !== 1) td.appendChild(el('div', 'sub', 'Last paid ' + money(b.amount) + ', quoted the same'));
+  if (b.amount !== null) {
+    td.appendChild(el('div', 'sub', 'Quote ' + money(b.amount) + ' before tax, from the HubSpot line item'));
+  } else if (deal.basePrice !== null) {
+    td.appendChild(el('div', 'sub', 'Quote ' + money(deal.basePrice * b.months) + ' before tax, from the base price (no price in HubSpot)'));
+  } else {
+    td.appendChild(el('div', 'sub warn', 'No price on the HubSpot line item and no base price: the quote cannot be created'));
+  }
   if (!b.periodStart) {
     td.appendChild(el('div', 'sub warn', b.reason + ' — set the Next Renewal Date in HubSpot'));
   } else if (!b.due) {
@@ -508,8 +514,7 @@ function renderDeals(data) {
     priceRow.appendChild(priceInput);
     priceRow.appendChild(saveBtn);
     priceTd.appendChild(priceRow);
-    if (deal.billing.kind === 'monthly') priceTd.appendChild(el('div', 'sub', 'Used for the monthly quote'));
-    if (deal.billing.kind === 'term') priceTd.appendChild(el('div', 'sub', 'Not used — term quotes bill the last-paid amount'));
+    priceTd.appendChild(el('div', 'sub', deal.billing.amount !== null ? 'Not used: HubSpot has a price' : 'Fallback: used because HubSpot has no price'));
     tr.appendChild(priceTd);
 
     const additionTd = document.createElement('td');

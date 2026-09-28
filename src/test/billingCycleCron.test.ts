@@ -100,8 +100,8 @@ describe("runBillingCycleCheck", () => {
     await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
 
     expect(generated()).toEqual([
-      ["due-1", "2026-10-01", 1, null],
-      ["due-2", "2026-10-01", 1, null],
+      ["due-1", "2026-10-01", 1, 5000],
+      ["due-2", "2026-10-01", 1, 5000],
       ["quarterly-today", "2026-10-01", 3, 39000],
       ["seven-month", "2026-10-01", 7, 27902],
     ]);

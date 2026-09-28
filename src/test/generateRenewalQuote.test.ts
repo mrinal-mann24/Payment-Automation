@@ -67,7 +67,7 @@ describe("generateRenewalQuote (POST /webhooks/renewal)", () => {
     const outcome = await generateRenewalQuote(fakeSupabase, "monthly-due", oct1);
 
     expect(outcome.kind).toBe("cycle");
-    expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-10-01", months: 1, amount: null });
+    expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-10-01", months: 1, amount: 5000 });
   });
 
   it("quotes a client whose date passed weeks ago — the manual route ignores the catch-up window", async () => {

@@ -10,6 +10,7 @@ import {
 } from "../repositories/renewalJobs.js";
 import { findClientPricing, upsertClientPricing } from "../repositories/clientPricing.js";
 import type { BillingCycle } from "../utils/billingCycle.js";
+import { latestRecurringLineItem } from "../utils/monthlyEligibility.js";
 
 export interface CreateZohoEstimateResult {
   zohoEstimateId: string;
@@ -74,45 +75,43 @@ export async function createZohoEstimate(
   }
 
   try {
-    // client_pricing is the source of truth for the renewal base price,
-    // once set — it takes over from HubSpot's line item price. On the
-    // legacy path, no row yet (new/unmigrated deal) falls back to HubSpot's
-    // existing lineItems[0], unchanged from before. A monthly cycle never
-    // guesses: HubSpot's association order is undefined, so lineItems[0]
-    // is not a safe price source for an automatic monthly charge.
-    // One-off additions are billed separately via their own quote+link
-    // flow (src/steps/createAdditionCharge.ts), never folded into the
-    // renewal total.
+    // HubSpot is the price: the recurring line item with the latest billing
+    // start date, unit price × quantity (decision 2026-09-28). The
+    // client_pricing base price per month is only the fallback for a line
+    // item that carries no price. With neither, nothing is billed rather
+    // than guessed. One-off additions are billed separately
+    // (src/steps/createAdditionCharge.ts), never folded into the renewal.
     const pricing = await findClientPricing(supabase, dealId);
     const basePrice = pricing?.base_price ?? null;
-    if (cycle && cycle.amount === null && basePrice === null) {
-      throw new Error(
-        `No base price in client_pricing for deal ${dealId}; refusing to guess a price for monthly cycle ${cycle.key}`,
-      );
-    }
 
     let dealForEstimate = deal;
     if (cycle) {
-      // A billing cycle is always one "Virtual Accounting" line: a term
-      // cycle bills what the client paid last time, a monthly cycle the
-      // client_pricing base price.
-      dealForEstimate = {
-        ...deal,
-        lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price: cycle.amount ?? basePrice! }],
-      };
-    } else if (basePrice !== null) {
-      const firstLineItem = deal.lineItems[0];
-      dealForEstimate = {
-        ...deal,
-        lineItems: [
-          {
-            id: firstLineItem?.id ?? "",
-            name: firstLineItem?.name ?? deal.dealName,
-            quantity: firstLineItem?.quantity ?? 1,
-            price: basePrice,
-          },
-        ],
-      };
+      const price = cycle.amount ?? (basePrice === null ? null : basePrice * cycle.months);
+      if (price === null) {
+        throw new Error(
+          `No price on the HubSpot line item and no base price in client_pricing for deal ${dealId}; refusing to guess a price for cycle ${cycle.key}`,
+        );
+      }
+      // A billing cycle is always one "Virtual Accounting" line.
+      dealForEstimate = { ...deal, lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price }] };
+    } else {
+      const latest = latestRecurringLineItem(deal.lineItems);
+      if (latest && latest.price > 0) {
+        dealForEstimate = { ...deal, lineItems: [latest] };
+      } else if (basePrice !== null) {
+        const firstLineItem = latest ?? deal.lineItems[0];
+        dealForEstimate = {
+          ...deal,
+          lineItems: [
+            {
+              id: firstLineItem?.id ?? "",
+              name: firstLineItem?.name ?? deal.dealName,
+              quantity: firstLineItem?.quantity ?? 1,
+              price: basePrice,
+            },
+          ],
+        };
+      }
     }
 
     const customerId = await findOrCreateCustomer(deal.contactEmail, deal.contactName);

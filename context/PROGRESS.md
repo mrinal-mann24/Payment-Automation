@@ -126,6 +126,13 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-28 (price from HubSpot) — Every client is now priced from the
+  HubSpot recurring line item with the latest billing start date, unit
+  price × quantity; the Supabase base price (per month × cycle length)
+  is only the fallback when HubSpot has no price. The latest item is
+  picked by billing start date instead of end date, and one-time items
+  are ignored. `monthlyEligibility.ts`, `createZohoEstimate.ts`, admin
+  page notes, tests.
 - 2026-09-28 (review fixes) — Whole-codebase review (correctness,
   security, silent failures) and its seven fixes: Delivery column and
   recorded WhatsApp failures for billing cycles; paid-but-unsettled rows

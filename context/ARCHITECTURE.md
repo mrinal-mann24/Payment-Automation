@@ -846,6 +846,16 @@ existing steps; there is no new table and no second state machine.
   organisation email — the business wants **accounts@aiaccountant.com**,
   which must be set and verified as the org's sender address in Zoho
   Books (and the domain's SPF/DKIM must allow Zoho to send for it).
+- **Price source (decision 2026-09-28, supersedes the earlier "monthly from
+  client_pricing" rule)**: HubSpot is the price for every client. The line
+  item that counts is the recurring one (billing start date and a usable
+  term) with the **latest billing start date**
+  (`latestRecurringLineItem`; one-time and undated items are ignored, a
+  billing end date is no longer needed); the quote is its unit price ×
+  quantity. `client_pricing.base_price` per month × the cycle length is
+  only the fallback when that line item has no price; with neither, the
+  quote is refused. The legacy yearly path bills the same line item. The
+  admin page shows the amount and which source it came from.
 - **Review fixes (2026-09-28)**, from a whole-codebase review:
   the Billing cycles table has a **Delivery** column (WhatsApp / quote
   email, and after payment confirmation / invoice email); a WhatsApp send
