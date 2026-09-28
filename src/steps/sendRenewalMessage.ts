@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { asWhatsapp, periodLabel, quoteMessage } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { getEstimatePdf } from "../clients/zoho.js";
 import { sendDocumentMessage } from "../clients/periskope.js";
@@ -49,7 +50,7 @@ export async function sendRenewalMessage(
   }
 
   const pdf = await getEstimatePdf(job.zoho_estimate_id);
-  const message = `Your renewal quote (${job.zoho_estimate_number}) is ready. Pay here: ${job.razorpay_short_url}`;
+  const message = asWhatsapp(quoteMessage(job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null, job.razorpay_short_url));
 
   await sendDocumentMessage(target.recipient, message, {
     base64: pdf.toString("base64"),

@@ -846,6 +846,11 @@ existing steps; there is no new table and no second state machine.
   organisation email — the business wants **accounts@aiaccountant.com**,
   which must be set and verified as the org's sender address in Zoho
   Books (and the domain's SPF/DKIM must allow Zoho to send for it).
+- **Message wording (2026-09-28)**: all client-facing text lives in
+  `src/utils/messages.ts` (`quoteMessage`, `invoiceMessage`,
+  `reminderMessage`, `periodLabel`), rendered with `asWhatsapp` (line
+  breaks) or `asEmailHtml` (escaped, `<br>`). Wording supplied by the
+  business; the payment link is appended to the quote and reminders.
 - **Price source (decision 2026-09-28, supersedes the earlier "monthly from
   client_pricing" rule)**: HubSpot is the price for every client. The line
   item that counts is the recurring one (billing start date and a usable

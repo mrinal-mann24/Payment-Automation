@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { escapeHtml } from "../utils/escapeHtml.js";
+import { asEmailHtml, asWhatsapp, oneTimeSubject, quoteMessage } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { createEstimate, emailEstimate, findOrCreateCustomer, getEstimatePdf } from "../clients/zoho.js";
 import { createPaymentLink } from "../clients/razorpay.js";
@@ -101,7 +101,7 @@ export async function createAdditionCharge(
       const pdf = await getEstimatePdf(estimateId);
       await sendDocumentMessage(
         target.recipient,
-        `Your quote (${estimateNumber}) for ${service} is ready. Pay here: ${shortUrl}`,
+        asWhatsapp(quoteMessage(oneTimeSubject(service, narration), shortUrl)),
         { base64: pdf.toString("base64"), filename: `${estimateNumber}.pdf`, mimetype: "application/pdf" },
       );
       periskopeSent = true;
@@ -126,12 +126,7 @@ export async function createAdditionCharge(
     await emailEstimate(estimateId, {
       to: deal.billingEmails,
       subject: `Quote ${estimateNumber} — ${service}`,
-      body: [
-        `Dear ${escapeHtml(deal.contactName || "Client")},`,
-        `Please find attached your quote ${estimateNumber} for ${escapeHtml(service)}${narration ? ` (${escapeHtml(narration)})` : ""}.`,
-        `You can pay online here: ${shortUrl}`,
-        "Thank you.",
-      ].join("<br><br>"),
+      body: asEmailHtml(quoteMessage(oneTimeSubject(service, narration), shortUrl)),
     });
     await markAdditionEstimateEmailSent(supabase, row.id);
     emailSent = true;

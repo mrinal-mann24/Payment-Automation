@@ -126,7 +126,7 @@ describe("sendPaymentConfirmation", () => {
     expect(getInvoicePdf).toHaveBeenCalledWith("zinv-123");
     expect(sendDocumentMessage).toHaveBeenCalledWith(
       "919876543210",
-      expect.stringContaining("INV-000123"),
+      expect.stringContaining("Thank you for the payment. We acknowledge receipt of the same."),
       expect.objectContaining({ filename: "INV-000123.pdf", mimetype: "application/pdf" }),
     );
     expect(markPaymentConfirmedSent).toHaveBeenCalledWith(fakeSupabase, "job-1");

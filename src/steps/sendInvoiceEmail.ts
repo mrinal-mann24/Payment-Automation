@@ -1,9 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { escapeHtml } from "../utils/escapeHtml.js";
+import { asEmailHtml, invoiceMessage, periodLabel } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailInvoice } from "../clients/zoho.js";
 import { findRenewalJob, markEmailError, markInvoiceEmailSent } from "../repositories/renewalJobs.js";
-import { servicePeriodFrom } from "../utils/billingCycle.js";
 import type { SendEmailResult } from "./sendQuoteEmail.js";
 
 // Best-effort, same contract as sendQuoteEmail: failures are recorded and
@@ -33,16 +32,12 @@ export async function sendInvoiceEmail(
       await markEmailError(supabase, job.id, `invoice email: no Accountant Email on the HubSpot deal`);
       return { sent: false, error: "no Accountant Email on the HubSpot deal" };
     }
-    const period = job.service_period_start ? servicePeriodFrom(job.service_period_start, job.term_months ?? 1).narration : null;
+    const period = job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null;
 
     await emailInvoice(job.zoho_invoice_id, {
       to: deal.billingEmails,
       subject: `Payment received — invoice ${job.zoho_invoice_number}`,
-      body: [
-        `Dear ${escapeHtml(deal.contactName || "Client")},`,
-        `Thank you, we have received your payment. Your invoice ${job.zoho_invoice_number} for Virtual Accounting${period ? ` (${period})` : ""} is attached.`,
-        "Thank you.",
-      ].join("<br><br>"),
+      body: asEmailHtml(invoiceMessage(period)),
     });
 
     await markInvoiceEmailSent(supabase, job.id);

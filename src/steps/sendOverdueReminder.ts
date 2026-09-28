@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { asWhatsapp, reminderMessage } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { sendTextMessage } from "../clients/periskope.js";
 import {
@@ -13,19 +14,6 @@ import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 export interface SendOverdueReminderResult {
   sent: boolean;
   skipReason: string | null;
-}
-
-// Wording not yet confirmed by the business (open item in
-// context/features/step5.md) — reasonable placeholder copy, revisit before
-// this goes live with real clients.
-function reminderMessage(stage: ReminderStage, shortUrl: string): string {
-  if (stage === 1) {
-    return `Reminder: your renewal payment is still pending. Please pay here: ${shortUrl}`;
-  }
-  if (stage === 2) {
-    return `Second reminder: your renewal payment is overdue. Please pay here at your earliest convenience: ${shortUrl}`;
-  }
-  return `Final reminder: your renewal payment is significantly overdue. Services will be discontinued if payment is not received shortly. Please pay here: ${shortUrl}`;
 }
 
 export async function sendOverdueReminder(
@@ -75,7 +63,7 @@ export async function sendOverdueReminder(
   }
 
   try {
-    await sendTextMessage(target.recipient, reminderMessage(stage, job.razorpay_short_url));
+    await sendTextMessage(target.recipient, asWhatsapp(reminderMessage(stage, job.razorpay_short_url)));
   } catch (err) {
     await releaseReminder(supabase, job.id, stage);
     throw err;

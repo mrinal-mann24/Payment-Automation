@@ -80,7 +80,7 @@ beforeEach(() => {
 });
 
 describe("sendQuoteEmail", () => {
-  it("emails the estimate to the HubSpot contact with the service period and payment link, then marks it sent", async () => {
+  it("emails the estimate to the HubSpot contact with the billing month and payment link, then marks it sent", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
 
     const result = await sendQuoteEmail(fakeSupabase, "deal-1", "2026-10");
@@ -89,8 +89,9 @@ describe("sendQuoteEmail", () => {
     expect(emailEstimate).toHaveBeenCalledWith("zest-123", {
       to: ["client@example.com"],
       subject: expect.stringContaining("QT-000123"),
-      body: expect.stringMatching(/1 October 2026 to 31 October 2026[\s\S]*https:\/\/rzp\.io\/i\/1/),
+      body: expect.stringContaining("Please find attached the quotation for October’26."),
     });
+    expect(vi.mocked(emailEstimate).mock.calls[0]![1].body).toContain("Pay online: https://rzp.io/i/1");
     expect(markEstimateEmailSent).toHaveBeenCalledWith(fakeSupabase, "job-1");
   });
 

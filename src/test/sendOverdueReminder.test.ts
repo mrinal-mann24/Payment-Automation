@@ -129,7 +129,7 @@ describe("sendOverdueReminder", () => {
     expect(claimReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 1);
   });
 
-  it("sends reminder 3 with a discontinuation notice (REQ-5.4)", async () => {
+  it("sends reminder 3 as the final follow-up (REQ-5.4)", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
 
@@ -137,7 +137,7 @@ describe("sendOverdueReminder", () => {
 
     expect(sendTextMessage).toHaveBeenCalledWith(
       "919876543210",
-      expect.stringMatching(/discontinued/i),
+      expect.stringContaining("this is a final follow-up regarding the pending payment"),
     );
     expect(claimReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 3);
   });

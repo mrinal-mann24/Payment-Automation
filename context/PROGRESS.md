@@ -126,6 +126,13 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-28 (message wording) — The business's wording for the quote,
+  the invoice and the three reminders is now used on WhatsApp and email,
+  from one module (`src/utils/messages.ts`). The period is named by month
+  ("October’26", or "October’26 to December’26" for a longer cycle); a
+  one-time quote names its service. The Razorpay link is kept in the quote
+  and every reminder ("Pay online: …"). Reminder days are unchanged
+  (5, 7, 9) — the business wrote "DAY -3" for the first one, to confirm.
 - 2026-09-28 (price from HubSpot) — Every client is now priced from the
   HubSpot recurring line item with the latest billing start date, unit
   price × quantity; the Supabase base price (per month × cycle length)

@@ -76,7 +76,7 @@ describe("sendAdditionPaymentConfirmation", () => {
 
     expect(sendDocumentMessage).toHaveBeenCalledWith(
       "120363423447165818",
-      'Payment received, thank you! Your invoice (INV-OT) for "Site visit" has been generated.',
+      expect.stringContaining("Please find attached the invoice for Site visit"),
       expect.objectContaining({ filename: "INV-OT.pdf" }),
     );
     expect(markAdditionPaymentConfirmedSent).toHaveBeenCalledWith(fakeSupabase, "row-1");

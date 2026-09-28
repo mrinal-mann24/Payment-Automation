@@ -113,7 +113,7 @@ describe("createAdditionCharge (one-time quote)", () => {
 
     expect(sendDocumentMessage).toHaveBeenCalledWith(
       "120363423447165818",
-      "Your quote (QT-OT) for Site visit is ready. Pay here: https://rzp.io/i/ot",
+      expect.stringContaining("Please find attached the quotation for Site visit (Visit to the Pune office on 12 October). Kindly arrange the payment"),
       expect.objectContaining({ filename: "QT-OT.pdf", mimetype: "application/pdf" }),
     );
     expect(markAdditionPeriskopeSent).toHaveBeenCalledWith(fakeSupabase, row.id);

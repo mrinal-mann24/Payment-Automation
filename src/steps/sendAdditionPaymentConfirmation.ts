@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { asWhatsapp, invoiceMessage, oneTimeSubject } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { getInvoicePdf } from "../clients/zoho.js";
 import { sendDocumentMessage } from "../clients/periskope.js";
@@ -45,7 +46,7 @@ export async function sendAdditionPaymentConfirmation(
   }
 
   const pdf = await getInvoicePdf(charge.zoho_invoice_id);
-  const message = `Payment received, thank you! Your invoice (${charge.zoho_invoice_number}) for "${charge.description}" has been generated.`;
+  const message = asWhatsapp(invoiceMessage(oneTimeSubject(charge.description, charge.narration)));
 
   await sendDocumentMessage(target.recipient, message, {
     base64: pdf.toString("base64"),

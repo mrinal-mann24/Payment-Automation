@@ -89,7 +89,7 @@ describe("sendInvoiceEmail", () => {
     expect(emailInvoice).toHaveBeenCalledWith("zinv-123", {
       to: ["client@example.com"],
       subject: expect.stringContaining("INV-000123"),
-      body: expect.stringContaining("INV-000123"),
+      body: expect.stringContaining("Please find attached the invoice for October’26 for your records."),
     });
     expect(markInvoiceEmailSent).toHaveBeenCalledWith(fakeSupabase, "job-1");
   });
