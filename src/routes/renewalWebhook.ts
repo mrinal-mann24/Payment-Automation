@@ -1,13 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
+import { hubspotIdSchema } from "../utils/validation.js";
 import { getSupabaseClient } from "../clients/supabase.js";
 import { config } from "../config.js";
 import { fetchDealStage, VA_ACTIVE_CUSTOMER_DEALSTAGES } from "../clients/hubspot.js";
 import { generateRenewalQuote, QuoteNotDueError } from "../jobs/generateRenewalQuote.js";
 
 const renewalWebhookSchema = z.object({
-  deal_id: z.string().min(1),
+  deal_id: hubspotIdSchema,
 });
 
 export const renewalWebhookRouter = Router();

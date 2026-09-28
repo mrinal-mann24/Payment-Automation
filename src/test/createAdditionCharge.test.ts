@@ -226,3 +226,14 @@ describe("createAdditionCharge — no accountant email", () => {
     expect(result).toMatchObject({ periskopeSent: true, emailSent: false, emailError: "no Accountant Email on the HubSpot deal" });
   });
 });
+
+describe("createAdditionCharge — the email body is HTML", () => {
+  it("escapes markup typed into the service name and narration", async () => {
+    await createAdditionCharge(fakeSupabase, "deal-1", 2500, "Audit <b>2026</b>", 'See <a href="https://evil.example">here</a>');
+
+    const body = vi.mocked(emailEstimate).mock.calls[0]![1].body;
+    expect(body).toContain("Audit &lt;b&gt;2026&lt;/b&gt;");
+    expect(body).toContain("&lt;a href=&quot;https://evil.example&quot;&gt;here&lt;/a&gt;");
+    expect(body).not.toContain("<a ");
+  });
+});

@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "../clients/supabase.js";
-import { findDealsWithRenewalDueToday } from "../clients/neon.js";
+import { findDealsWithRenewalDue } from "../clients/neon.js";
 import { fetchDealStage, VA_ACTIVE_CUSTOMER_DEALSTAGES } from "../clients/hubspot.js";
+import { findRecentLegacyJob } from "../repositories/renewalJobs.js";
 import { istToday } from "../utils/billingCycle.js";
 import { runRenewalPipeline } from "./renewalPipeline.js";
 
@@ -10,9 +11,21 @@ import { runRenewalPipeline } from "./renewalPipeline.js";
 // cycle deal's paid line item ends the day its next cycle starts, so Neon
 // reports it as "due today" that day, and it must be skipped here or it
 // would be quoted twice under two different keys.
+//
+// A due date is picked up on the day and for three days after, like a
+// billing cycle, so one missed 11:00 run does not lose a yearly renewal.
+// Repeating is safe: the row is keyed by the deal's billing cycle and Next
+// Renewal Date, so an unpaid quote just resumes; a quote already paid
+// inside the window is skipped outright in case the date has since moved.
+const LEGACY_CATCH_UP_DAYS = 4;
+
 export async function runRenewalCheck(cycleDealIds: Set<string>, now: Date = new Date()): Promise<void> {
-  const dueDeals = await findDealsWithRenewalDueToday(istToday(now));
-  console.log(`[renewalCron] ${dueDeals.length} deal(s) due for renewal today`);
+  const today = istToday(now);
+  const windowStart = new Date(Date.parse(`${today}T00:00:00Z`) - (LEGACY_CATCH_UP_DAYS - 1) * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const dueDeals = await findDealsWithRenewalDue(today, LEGACY_CATCH_UP_DAYS);
+  console.log(`[renewalCron] ${dueDeals.length} deal(s) due for renewal in the last ${LEGACY_CATCH_UP_DAYS} days`);
 
   const supabase = getSupabaseClient();
 
@@ -31,6 +44,14 @@ export async function runRenewalCheck(cycleDealIds: Set<string>, now: Date = new
       if (!VA_ACTIVE_CUSTOMER_DEALSTAGES.includes(dealStage)) {
         console.log(
           `[renewalCron] deal ${deal.dealId} (${deal.dealName}) -> skipped, dealstage ${dealStage} is not an active-customer stage`,
+        );
+        continue;
+      }
+
+      const recent = await findRecentLegacyJob(supabase, deal.dealId, windowStart);
+      if (recent?.paid_at) {
+        console.log(
+          `[renewalCron] deal ${deal.dealId} (${deal.dealName}) -> skipped, quote ${recent.zoho_estimate_number} for ${recent.billing_period} is already paid`,
         );
         continue;
       }

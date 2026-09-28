@@ -407,10 +407,12 @@ export interface ZohoPaymentInput {
   date: string; // YYYY-MM-DD
   reference: string | null;
   description: string;
+  amount: number | null; // what was received; null = the invoice's full balance
 }
 
-// Records a customer payment for the invoice's full balance so Zoho Books
-// shows it as Paid (and its own reminders stop). Needs the
+// Records a customer payment against the invoice — the amount received, or
+// the full balance when none was entered — so Zoho Books shows it as Paid
+// (partially paid for a short payment) and its own reminders stop. Needs the
 // ZohoBooks.customerpayments.CREATE scope — missing from the token as of
 // 2026-09-22 (401, code 57), so the step fails and is retried daily until
 // the token is re-granted. An invoice Zoho already shows as paid is left
@@ -424,16 +426,19 @@ export async function recordInvoicePayment(
     return { paymentId: "paid-in-zoho", alreadyPaid: true };
   }
 
+  // What was actually received, never more than what is owed.
+  const amount = Math.min(payment.amount ?? invoice.balance, invoice.balance);
+
   const result = (await zohoFetch(`/customerpayments?organization_id=${config.zoho.orgId}`, {
     method: "POST",
     body: JSON.stringify({
       customer_id: invoice.customerId,
       payment_mode: payment.mode,
-      amount: invoice.balance,
+      amount,
       date: payment.date,
       reference_number: payment.reference ?? "",
       description: payment.description,
-      invoices: [{ invoice_id: invoiceId, amount_applied: invoice.balance }],
+      invoices: [{ invoice_id: invoiceId, amount_applied: amount }],
     }),
   })) as { payment: { payment_id: string } };
 

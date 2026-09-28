@@ -175,7 +175,13 @@ describe("recordInvoicePayment", () => {
     return calls;
   }
 
-  const payment = { mode: "banktransfer", date: "2026-09-22", reference: "UTR 123", description: "Paid via Yes Bank" };
+  const payment = {
+    mode: "banktransfer",
+    date: "2026-09-22",
+    reference: "UTR 123",
+    description: "Paid via Yes Bank",
+    amount: null as number | null,
+  };
 
   it("records a customer payment for the invoice's full balance so Zoho shows it as paid", async () => {
     const calls = mockInvoiceFetch({ status: "sent", balance: 3240 });
@@ -191,6 +197,22 @@ describe("recordInvoicePayment", () => {
       date: "2026-09-22",
       reference_number: "UTR 123",
       description: "Paid via Yes Bank",
+      invoices: [{ invoice_id: "zinv-1", amount_applied: 3240 }],
+    });
+  });
+
+  it("records the amount actually received when it is less than the balance, and never more than the balance", async () => {
+    const short = mockInvoiceFetch({ status: "sent", balance: 3240 });
+    await recordInvoicePayment("zinv-1", { ...payment, amount: 3000 });
+    expect(short.find((c) => c.method === "POST")!.body).toMatchObject({
+      amount: 3000,
+      invoices: [{ invoice_id: "zinv-1", amount_applied: 3000 }],
+    });
+
+    const over = mockInvoiceFetch({ status: "sent", balance: 3240 });
+    await recordInvoicePayment("zinv-1", { ...payment, amount: 5000 });
+    expect(over.find((c) => c.method === "POST")!.body).toMatchObject({
+      amount: 3240,
       invoices: [{ invoice_id: "zinv-1", amount_applied: 3240 }],
     });
   });

@@ -6,12 +6,14 @@ vi.mock("../steps/createRazorpayLink.js", () => ({ createRazorpayLink: vi.fn() }
 vi.mock("../steps/sendRenewalMessage.js", () => ({ sendRenewalMessage: vi.fn() }));
 vi.mock("../steps/sendQuoteEmail.js", () => ({ sendQuoteEmail: vi.fn() }));
 vi.mock("../steps/updateHubspotDeal.js", () => ({ updateHubspotDeal: vi.fn() }));
+vi.mock("../repositories/renewalJobs.js", () => ({ markPeriskopeError: vi.fn() }));
 
 import { createZohoEstimate } from "../steps/createZohoEstimate.js";
 import { createRazorpayLink } from "../steps/createRazorpayLink.js";
 import { sendRenewalMessage } from "../steps/sendRenewalMessage.js";
 import { sendQuoteEmail } from "../steps/sendQuoteEmail.js";
 import { updateHubspotDeal } from "../steps/updateHubspotDeal.js";
+import { markPeriskopeError } from "../repositories/renewalJobs.js";
 import { runRenewalPipeline } from "../jobs/renewalPipeline.js";
 
 const fakeSupabase = {} as SupabaseClient;
@@ -66,6 +68,12 @@ describe("runRenewalPipeline", () => {
 
     expect(result.periskopeSent).toBe(false);
     expect(result.periskopeSkipReason).toMatch(/Periskope API error 500/);
+    expect(markPeriskopeError).toHaveBeenCalledWith(
+      fakeSupabase,
+      "deal-1",
+      "2026-10",
+      expect.stringMatching(/Periskope API error 500/),
+    );
     expect(sendQuoteEmail).toHaveBeenCalled();
     expect(updateHubspotDeal).toHaveBeenCalled();
   });

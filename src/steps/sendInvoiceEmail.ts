@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { escapeHtml } from "../utils/escapeHtml.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailInvoice } from "../clients/zoho.js";
 import { findRenewalJob, markEmailError, markInvoiceEmailSent } from "../repositories/renewalJobs.js";
@@ -38,7 +39,7 @@ export async function sendInvoiceEmail(
       to: deal.billingEmails,
       subject: `Payment received — invoice ${job.zoho_invoice_number}`,
       body: [
-        `Dear ${deal.contactName || "Client"},`,
+        `Dear ${escapeHtml(deal.contactName || "Client")},`,
         `Thank you, we have received your payment. Your invoice ${job.zoho_invoice_number} for Virtual Accounting${period ? ` (${period})` : ""} is attached.`,
         "Thank you.",
       ].join("<br><br>"),

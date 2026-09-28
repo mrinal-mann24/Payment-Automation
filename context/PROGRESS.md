@@ -126,6 +126,16 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-28 (review fixes) — Whole-codebase review (correctness,
+  security, silent failures) and its seven fixes: Delivery column and
+  recorded WhatsApp failures for billing cycles; paid-but-unsettled rows
+  always on the admin page; four-day catch-up for the legacy yearly flow
+  with a paid-quote guard; amount received on "Mark paid by Yes Bank",
+  passed to Zoho; numeric deal ids, real non-future payment dates and
+  capped amounts; HTML-escaped email bodies. 220/220. Still open from the
+  review: no rate limiting, container runs as root, one-time quote
+  double-submit is only guarded by the 5-minute window, paise-level
+  rounding on odd-month line items.
 - 2026-09-23 (pause switch + sender) — Per-client **Auto quote** switch on
   the admin page (`client_pricing.auto_quote`, migration 0013 applied
   live; `base_price` now nullable): paused clients are skipped by the

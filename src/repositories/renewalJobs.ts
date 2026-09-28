@@ -517,7 +517,13 @@ export async function findAdminCycleJobs(supabase: SupabaseClient, currentMonthK
   const { data, error } = await supabase
     .from("renewal_jobs")
     .select("*")
-    .or(`paid_at.is.null,billing_period.eq.${currentMonthKey},service_period_start.gte.${currentMonthKey}-01`)
+    // Unpaid cycles, cycles that started this month, and any paid cycle
+    // with a settlement step still outstanding (whatever its month), so a
+    // row the daily sweep keeps retrying never drops out of sight.
+    .or(
+      `paid_at.is.null,billing_period.eq.${currentMonthKey},service_period_start.gte.${currentMonthKey}-01,` +
+        "and(paid_at.not.is.null,or(invoice_step_status.neq.done,zoho_payment_id.is.null,periskope_payment_confirmed_sent.is.false,invoice_email_sent.is.false,hubspot_renewal_done.is.false))",
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -690,4 +696,50 @@ export async function markEmailError(supabase: SupabaseClient, jobId: string, me
   if (error) {
     throw new Error(`Failed to record email error on renewal_jobs: ${error.message}`);
   }
+}
+
+// A WhatsApp send that threw (Periskope, or the PDF download): kept on the
+// row so the admin page can show it. periskope_skip_reason is left alone,
+// because a value there stops the send being retried.
+export async function markPeriskopeError(
+  supabase: SupabaseClient,
+  dealId: string,
+  billingPeriod: string,
+  message: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("renewal_jobs")
+    .update({
+      error_log: { step: "whatsapp", message, at: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("hubspot_deal_id", dealId)
+    .eq("billing_period", billingPeriod);
+
+  if (error) {
+    throw new Error(`Failed to record the WhatsApp failure on renewal_jobs: ${error.message}`);
+  }
+}
+
+// The legacy (due-date) flow's newest row for a deal since `sinceDate` (IST).
+export async function findRecentLegacyJob(
+  supabase: SupabaseClient,
+  dealId: string,
+  sinceDate: string,
+): Promise<RenewalJob | null> {
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .select("*")
+    .eq("hubspot_deal_id", dealId)
+    .is("service_period_start", null)
+    .gte("created_at", `${sinceDate}T00:00:00+05:30`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to look up recent legacy renewal_jobs row: ${error.message}`);
+  }
+
+  return data as RenewalJob | null;
 }

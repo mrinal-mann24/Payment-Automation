@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { escapeHtml } from "../utils/escapeHtml.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailEstimate } from "../clients/zoho.js";
 import { findRenewalJob, markEmailError, markEstimateEmailSent } from "../repositories/renewalJobs.js";
@@ -50,7 +51,7 @@ export async function sendQuoteEmail(
       to: deal.billingEmails,
       subject: `Virtual Accounting quote ${job.zoho_estimate_number}`,
       body: [
-        `Dear ${deal.contactName || "Client"},`,
+        `Dear ${escapeHtml(deal.contactName || "Client")},`,
         `Please find attached your Virtual Accounting quote ${job.zoho_estimate_number}${period ? ` (${period})` : ""}.`,
         `You can pay online here: ${job.razorpay_short_url}`,
         "Thank you.",

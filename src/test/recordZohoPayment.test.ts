@@ -23,6 +23,7 @@ const paidJob = {
   zoho_invoice_id: "zinv-1",
   zoho_payment_id: null,
   payment_method: "yes_bank",
+  payment_amount: 5000,
   payment_date: "2026-10-03",
   payment_reference: "UTR 123",
   payment_narration: "NEFT from Acme",
@@ -35,6 +36,7 @@ const paidCharge = {
   zoho_invoice_id: "zinv-9",
   zoho_payment_id: null,
   payment_method: "razorpay",
+  payment_amount: 8640,
   payment_date: "2026-10-05",
   payment_reference: "pay_1",
   payment_narration: null,
@@ -56,6 +58,7 @@ describe("recordZohoPayment (billing cycle)", () => {
       date: "2026-10-03",
       reference: "UTR 123",
       description: "Paid via Yes Bank: NEFT from Acme",
+      amount: 5000,
     });
     expect(saveZohoPaymentId).toHaveBeenCalledWith(fakeSupabase, "job-1", "zpay-1");
   });
@@ -107,6 +110,7 @@ describe("recordAdditionZohoPayment (one-time quote)", () => {
       date: "2026-10-05",
       reference: "pay_1",
       description: "Paid via Razorpay",
+      amount: 8640,
     });
     expect(saveAdditionZohoPaymentId).toHaveBeenCalledWith(fakeSupabase, "add-1", "zpay-1");
   });

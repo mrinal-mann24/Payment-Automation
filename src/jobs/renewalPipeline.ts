@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createZohoEstimate } from "../steps/createZohoEstimate.js";
 import { createRazorpayLink } from "../steps/createRazorpayLink.js";
+import { markPeriskopeError } from "../repositories/renewalJobs.js";
 import { sendRenewalMessage } from "../steps/sendRenewalMessage.js";
 import { sendQuoteEmail } from "../steps/sendQuoteEmail.js";
 import { updateHubspotDeal } from "../steps/updateHubspotDeal.js";
@@ -42,6 +43,12 @@ export async function runRenewalPipeline(
   } catch (err) {
     periskopeSkipReason = err instanceof Error ? err.message : String(err);
     console.error(`[renewalPipeline] deal ${dealId} (${billingPeriod}) WhatsApp send failed: ${periskopeSkipReason}`);
+    try {
+      await markPeriskopeError(supabase, dealId, billingPeriod, periskopeSkipReason);
+    } catch (recordErr) {
+      const message = recordErr instanceof Error ? recordErr.message : String(recordErr);
+      console.error(`[renewalPipeline] deal ${dealId} (${billingPeriod}) could not record the WhatsApp failure: ${message}`);
+    }
   }
 
   const { sent: emailSent, error: emailError } = await sendQuoteEmail(supabase, dealId, billingPeriod);

@@ -846,6 +846,24 @@ existing steps; there is no new table and no second state machine.
   organisation email — the business wants **accounts@aiaccountant.com**,
   which must be set and verified as the org's sender address in Zoho
   Books (and the domain's SPF/DKIM must allow Zoho to send for it).
+- **Review fixes (2026-09-28)**, from a whole-codebase review:
+  the Billing cycles table has a **Delivery** column (WhatsApp / quote
+  email, and after payment confirmation / invoice email); a WhatsApp send
+  that throws is kept on the row as `error_log {step: "whatsapp"}`
+  (`markPeriskopeError`) without touching `periskope_skip_reason`, so the
+  retry inside the generation window still happens. `findAdminCycleJobs`
+  also returns any paid cycle with a settlement step outstanding, whatever
+  its month, and the admin JSON adds paid-but-unsettled one-time quotes
+  beyond the 100-row cap. "Mark paid by Yes Bank" takes the **amount
+  received**; Zoho records that amount, capped at the invoice balance
+  (a short payment shows as partially paid in Zoho; the cycle is PAID
+  here either way). Request validation (`src/utils/validation.ts`): deal
+  ids must be digits before they reach a HubSpot URL, payment dates must
+  be real and not in the future, amounts are capped at one crore. Text
+  typed by a person is HTML-escaped in email bodies
+  (`src/utils/escapeHtml.ts`). The legacy due-date flow picks a due date
+  up for four days (`findDealsWithRenewalDue(today, 4)`) and skips a deal
+  whose quote from that window is already paid (`findRecentLegacyJob`).
 - **Timezone**: every date goes through `src/utils/billingCycle.ts`
   (fixed +05:30 arithmetic on UTC getters). HubSpot's epoch-ms dates are
   calendar dates and are never shifted; Razorpay `created_at` (seconds) is

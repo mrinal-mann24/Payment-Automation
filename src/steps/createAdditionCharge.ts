@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { escapeHtml } from "../utils/escapeHtml.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { createEstimate, emailEstimate, findOrCreateCustomer, getEstimatePdf } from "../clients/zoho.js";
 import { createPaymentLink } from "../clients/razorpay.js";
@@ -126,8 +127,8 @@ export async function createAdditionCharge(
       to: deal.billingEmails,
       subject: `Quote ${estimateNumber} — ${service}`,
       body: [
-        `Dear ${deal.contactName || "Client"},`,
-        `Please find attached your quote ${estimateNumber} for ${service}${narration ? ` (${narration})` : ""}.`,
+        `Dear ${escapeHtml(deal.contactName || "Client")},`,
+        `Please find attached your quote ${estimateNumber} for ${escapeHtml(service)}${narration ? ` (${escapeHtml(narration)})` : ""}.`,
         `You can pay online here: ${shortUrl}`,
         "Thank you.",
       ].join("<br><br>"),

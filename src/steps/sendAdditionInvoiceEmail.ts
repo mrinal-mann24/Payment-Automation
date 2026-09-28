@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { escapeHtml } from "../utils/escapeHtml.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailInvoice } from "../clients/zoho.js";
 import {
@@ -39,8 +40,8 @@ export async function sendAdditionInvoiceEmail(
       to: deal.billingEmails,
       subject: `Payment received — invoice ${charge.zoho_invoice_number}`,
       body: [
-        `Dear ${deal.contactName || "Client"},`,
-        `Thank you, we have received your payment. Your invoice ${charge.zoho_invoice_number} for ${charge.description}${charge.narration ? ` (${charge.narration})` : ""} is attached.`,
+        `Dear ${escapeHtml(deal.contactName || "Client")},`,
+        `Thank you, we have received your payment. Your invoice ${charge.zoho_invoice_number} for ${escapeHtml(charge.description)}${charge.narration ? ` (${escapeHtml(charge.narration)})` : ""} is attached.`,
         "Thank you.",
       ].join("<br><br>"),
     });

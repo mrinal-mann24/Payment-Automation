@@ -197,6 +197,7 @@ export const pricingAdminHtml = `<!doctype html>
             <th style="width:140px">Status</th>
             <th style="min-width:170px">Quote</th>
             <th style="min-width:170px">Payment</th>
+            <th style="min-width:220px">Delivery</th>
             <th style="width:110px">Reminders</th>
             <th style="min-width:320px">Actions</th>
           </tr>
@@ -611,8 +612,15 @@ function formButtons(form, save, cancelLabel) {
 function yesBankForm(target, today) {
   const form = el('div', 'payment-form');
   form.dataset.kind = 'yes_bank';
-  const label = el('div', 'full', 'Yes Bank payment of ' + money(target.quoteTotal) + ' for ' + target.label);
+  const label = el('div', 'full', 'Yes Bank payment for ' + target.label + ' · quote ' + money(target.quoteTotal));
   label.style.fontWeight = '600';
+  const amount = document.createElement('input');
+  amount.type = 'number';
+  amount.min = '0';
+  amount.step = '0.01';
+  amount.className = 'mono';
+  amount.value = target.quoteTotal ?? '';
+  amount.placeholder = 'Amount received';
   const date = document.createElement('input');
   date.type = 'date';
   date.className = 'mono';
@@ -623,14 +631,17 @@ function yesBankForm(target, today) {
   narration.placeholder = 'Narration (optional, e.g. bank reference)';
   const save = el('button', 'btn teal small', 'Confirm payment');
   save.type = 'button';
-  const hint = el('div', 'sub full', 'Payment date = the day the money reached the bank. It is written to HubSpot as Date Paid and to the Zoho invoice as the payment date.');
+  const hint = el('div', 'sub full', 'Amount = what actually reached the bank; change it only if it differs from the quote. Payment date = the day it arrived. Both are written to the Zoho invoice, and the date to HubSpot as Date Paid. The cycle is marked PAID either way.');
 
   save.onclick = () => {
+    const received = Number(amount.value);
+    if (!Number.isFinite(received) || received <= 0) { toast('err', 'Enter the amount received', true); return; }
     if (!date.value) { toast('err', 'Enter the payment date', true); return; }
-    submitPayment(target, save, 'Recording…', { method: 'yes_bank', paymentDate: date.value, narration: narration.value.trim() });
+    submitPayment(target, save, 'Recording…', { method: 'yes_bank', amount: received, paymentDate: date.value, narration: narration.value.trim() });
   };
 
   form.appendChild(label);
+  form.appendChild(amount);
   form.appendChild(date);
   form.appendChild(narration);
   form.appendChild(hint);
@@ -696,6 +707,17 @@ function paymentCell(row) {
   return td;
 }
 
+// What actually reached the client for a billing cycle.
+function deliveryCell(row) {
+  const paid = row.status === 'paid';
+  const td = el('td', null,
+    'WhatsApp ' + (row.whatsappSent ? 'sent' : 'not sent') +
+    ' · quote email ' + (row.emailSent ? 'sent' : 'not sent') +
+    (paid ? ' · confirmation ' + (row.confirmationSent ? 'sent' : 'not sent') + ' · invoice email ' + (row.invoiceEmailSent ? 'sent' : 'not sent') : ''));
+  if (!row.whatsappSent) td.appendChild(el('div', 'sub warn', row.whatsappSkipReason || 'WhatsApp quote not delivered yet'));
+  return td;
+}
+
 function remindersCell(count) {
   const td = el('td', null);
   const dots = el('span', 'reminders');
@@ -739,6 +761,7 @@ function renderCycles(data) {
 
       tr.appendChild(paymentCell(cycle));
 
+      tr.appendChild(deliveryCell(cycle));
       tr.appendChild(remindersCell(cycle.remindersSent));
 
       if (cycle.status !== 'paid' && cycle.quoteNumber) {
@@ -756,7 +779,7 @@ function renderCycles(data) {
   if (rows === 0) {
     const tr = document.createElement('tr');
     const td = el('td', 'empty', 'No billing cycles yet. A quote goes out automatically at 11:00 IST on each client Next Renewal Date; a row appears here the moment it is sent, with Mark paid by Yes Bank and Mark paid by Razorpay beside it.');
-    td.colSpan = 7;
+    td.colSpan = 8;
     tr.appendChild(td);
     tbody.appendChild(tr);
   }

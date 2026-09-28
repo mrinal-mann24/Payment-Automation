@@ -10,7 +10,12 @@ import {
   type DealEmails,
 } from "../clients/hubspot.js";
 import { fetchPaymentLink } from "../clients/razorpay.js";
-import { findAdditionChargeById, listRecentAdditionCharges, type AdditionCharge } from "../repositories/additionCharges.js";
+import {
+  findAdditionChargeById,
+  findPaidUnsettledAdditionCharges,
+  listRecentAdditionCharges,
+  type AdditionCharge,
+} from "../repositories/additionCharges.js";
 import { setAutoQuote, upsertClientPricing } from "../repositories/clientPricing.js";
 import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
 import { createAdditionCharge } from "../steps/createAdditionCharge.js";
@@ -24,6 +29,7 @@ import {
 import { billingMonthKey, daysBetween, istToday, servicePeriodFrom, unixSecondsToIstDate } from "../utils/billingCycle.js";
 import { deriveCycleStatus } from "../utils/cycleStatus.js";
 import { classifyDeal, cycleLabel, type DealClassification } from "../utils/monthlyEligibility.js";
+import { amountSchema, hubspotIdSchema, MAX_AMOUNT, paymentDateSchema } from "../utils/validation.js";
 import { pricingAdminHtml } from "./pricingAdminPage.js";
 
 export const pricingAdminRouter = Router();
@@ -34,6 +40,10 @@ pricingAdminRouter.get("/admin/pricing", (_req: Request, res: Response) => {
 
 function cycleView(job: RenewalJob) {
   const errorLog = job.error_log as { step?: string; message?: string } | null;
+  // A WhatsApp failure belongs to the delivery column, and only while the
+  // message is still unsent.
+  const whatsappError = errorLog?.step === "whatsapp" ? (errorLog.message ?? null) : null;
+  const otherError = errorLog?.message && errorLog.step !== "whatsapp" ? `${errorLog.step ?? "error"}: ${errorLog.message}` : null;
   return {
     jobId: job.id,
     billingPeriod: job.billing_period,
@@ -51,8 +61,13 @@ function cycleView(job: RenewalJob) {
     paymentDate: job.payment_date,
     paymentNarration: job.payment_narration,
     zohoPaid: Boolean(job.zoho_payment_id),
+    whatsappSent: job.periskope_sent,
+    whatsappSkipReason: job.periskope_sent ? null : (job.periskope_skip_reason ?? whatsappError),
+    emailSent: job.estimate_email_sent,
+    confirmationSent: job.periskope_payment_confirmed_sent,
+    invoiceEmailSent: job.invoice_email_sent,
     remindersSent: [job.reminder_1_sent_at, job.reminder_2_sent_at, job.reminder_3_sent_at].filter(Boolean).length,
-    issue: job.email_error ?? (errorLog?.message ? `${errorLog.step ?? "error"}: ${errorLog.message}` : null),
+    issue: job.email_error ?? otherError,
   };
 }
 
@@ -152,12 +167,19 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
     const supabase = getSupabaseClient();
     const monthKey = billingMonthKey();
     const today = istToday();
-    const [deals, pricing, jobs, additions] = await Promise.all([
+    const [deals, pricing, jobs, recentAdditions, unsettledAdditions] = await Promise.all([
       fetchVaDealsWithLineItems(),
       supabase.from("client_pricing").select("*"),
       findAdminCycleJobs(supabase, monthKey),
       listRecentAdditionCharges(supabase),
+      findPaidUnsettledAdditionCharges(supabase),
     ]);
+    // The recent list is capped; a paid quote with a step still outstanding
+    // is shown however old it is.
+    const additions = [
+      ...recentAdditions,
+      ...unsettledAdditions.filter((charge) => !recentAdditions.some((recent) => recent.id === charge.id)),
+    ];
     if (pricing.error) throw new Error(pricing.error.message);
     const emails = await fetchVaDealEmails(deals.map((deal) => deal.dealId));
 
@@ -196,8 +218,8 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
 });
 
 const savePricingSchema = z.object({
-  dealId: z.string().min(1),
-  basePrice: z.number().nonnegative(),
+  dealId: hubspotIdSchema,
+  basePrice: z.number().nonnegative().max(MAX_AMOUNT),
   dealName: z.string().optional(),
 });
 
@@ -221,7 +243,7 @@ pricingAdminRouter.post("/admin/pricing/base-price", async (req: Request, res: R
 // Pause / resume a client's automatic quotes (the 11:00 IST run and the
 // on-demand route both honour it).
 const autoQuoteSchema = z.object({
-  dealId: z.string().min(1),
+  dealId: hubspotIdSchema,
   enabled: z.boolean(),
   dealName: z.string().optional(),
 });
@@ -246,7 +268,7 @@ pricingAdminRouter.post("/admin/pricing/auto-quote", async (req: Request, res: R
 // The Accountant Email list lives on the HubSpot deal; the page edits it
 // in place. Blank clears it, and then no email is sent.
 const accountantEmailsSchema = z.object({
-  dealId: z.string().min(1),
+  dealId: hubspotIdSchema,
   emails: z.string().trim().max(600),
 });
 
@@ -276,8 +298,8 @@ pricingAdminRouter.post("/admin/pricing/accountant-email", async (req: Request, 
 // One-time quote: service name + optional narration, sent to the group and
 // by email like a renewal quote.
 const sendAdditionSchema = z.object({
-  dealId: z.string().min(1),
-  amount: z.number().positive(),
+  dealId: hubspotIdSchema,
+  amount: amountSchema,
   service: z.string().trim().min(1).max(200),
   narration: z.string().trim().max(500).optional(),
 });
@@ -313,8 +335,8 @@ pricingAdminRouter.post("/admin/pricing/send-addition", async (req: Request, res
 const recordPaymentSchema = z.object({
   jobId: z.string().min(1),
   method: z.enum(PAYMENT_METHODS),
-  amount: z.number().positive().optional(),
-  paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  amount: amountSchema.optional(),
+  paymentDate: paymentDateSchema.optional(),
   narration: z.string().trim().max(500).optional(),
   reference: z.string().trim().max(100).optional(),
 });

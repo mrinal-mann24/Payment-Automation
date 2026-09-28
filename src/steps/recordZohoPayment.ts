@@ -25,6 +25,7 @@ const METHOD_LABELS: Record<string, string> = {
 
 interface PaidRow {
   payment_method: string | null;
+  payment_amount: number | null;
   payment_date: string | null;
   payment_reference: string | null;
   payment_narration: string | null;
@@ -37,6 +38,7 @@ function zohoPaymentFor(row: PaidRow): ZohoPaymentInput {
     mode: ZOHO_PAYMENT_MODES[method] ?? "others",
     date: row.payment_date ?? istToday(),
     reference: row.payment_reference,
+    amount: row.payment_amount,
     description: `Paid via ${label}${row.payment_narration ? `: ${row.payment_narration}` : ""}`,
   };
 }
