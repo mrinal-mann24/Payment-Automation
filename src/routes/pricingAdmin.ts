@@ -28,7 +28,7 @@ import {
 } from "../steps/settleRenewalPayment.js";
 import { billingMonthKey, daysBetween, istToday, servicePeriodFrom, unixSecondsToIstDate } from "../utils/billingCycle.js";
 import { deriveCycleStatus } from "../utils/cycleStatus.js";
-import { classifyDeal, cycleLabel, type DealClassification } from "../utils/monthlyEligibility.js";
+import { classifyDeal, cycleLabel, latestRecurringLineItem, type DealClassification } from "../utils/monthlyEligibility.js";
 import { amountSchema, hubspotIdSchema, MAX_AMOUNT, paymentDateSchema } from "../utils/validation.js";
 import { pricingAdminHtml } from "./pricingAdminPage.js";
 
@@ -193,11 +193,16 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
       const dealJobs = jobsByDealId.get(deal.dealId) ?? [];
       const pricing = pricingByDealId.get(deal.dealId);
       const paused = pricing ? pricing.auto_quote === false : false;
+      // The price HubSpot holds for this client, whatever its cycle: the
+      // recurring line item with the latest billing start date.
+      const priced = latestRecurringLineItem(deal.lineItems);
+      const hubspotPrice = priced && priced.price > 0 ? priced.price * priced.quantity : null;
       return {
         dealId: deal.dealId,
         dealName: deal.dealName,
         dealStage: deal.dealStage,
         basePrice: pricing?.base_price ?? null,
+        hubspotPrice,
         autoQuote: !paused,
         billing: billingView(classifyDeal(deal, today), today, dealJobs, paused),
         email: emailView(emails.get(deal.dealId)),

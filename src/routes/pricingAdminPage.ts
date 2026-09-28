@@ -384,6 +384,7 @@ function billingCell(deal) {
   }
   if (b.kind !== 'cycle') {
     td.appendChild(el('div', 'sub', b.reason));
+    if (deal.hubspotPrice !== null) td.appendChild(el('div', 'sub', 'Quote ' + money(deal.hubspotPrice) + ' before tax, from the HubSpot line item'));
     return td;
   }
   if (b.amount !== null) {
@@ -514,7 +515,7 @@ function renderDeals(data) {
     priceRow.appendChild(priceInput);
     priceRow.appendChild(saveBtn);
     priceTd.appendChild(priceRow);
-    priceTd.appendChild(el('div', 'sub', deal.billing.amount !== null ? 'Not used: HubSpot has a price' : 'Fallback: used because HubSpot has no price'));
+    priceTd.appendChild(el('div', 'sub', deal.hubspotPrice !== null ? 'Not used: HubSpot has a price' : 'Fallback: used because HubSpot has no price'));
     tr.appendChild(priceTd);
 
     const additionTd = document.createElement('td');
