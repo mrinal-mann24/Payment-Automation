@@ -10,7 +10,7 @@ import {
 } from "../repositories/renewalJobs.js";
 import { findClientPricing, upsertClientPricing } from "../repositories/clientPricing.js";
 import type { BillingCycle } from "../utils/billingCycle.js";
-import { latestRecurringLineItem } from "../utils/monthlyEligibility.js";
+import { cleanLineItemName, latestRecurringLineItem } from "../utils/monthlyEligibility.js";
 
 export interface CreateZohoEstimateResult {
   zohoEstimateId: string;
@@ -20,9 +20,10 @@ export interface CreateZohoEstimateResult {
 }
 
 // `cycle` selects the monthly flow: the renewal_jobs row is keyed by
-// calendar month (YYYY-MM) and the quote reads "Virtual Accounting /
-// Service period: …". Without it the legacy due-date flow runs unchanged,
-// keyed by HubSpot's billing_cycle + next_renewal_date.
+// calendar month (YYYY-MM) and the quote line is named after the priced
+// HubSpot line item (e.g. "All VA Services / Service period: …"). Without
+// `cycle` the legacy due-date flow runs unchanged, keyed by HubSpot's
+// billing_cycle + next_renewal_date.
 export async function createZohoEstimate(
   supabase: SupabaseClient,
   dealId: string,
@@ -98,11 +99,16 @@ export async function createZohoEstimate(
           `No price on the HubSpot line item and no base price in client_pricing for deal ${dealId}; refusing to guess a price for cycle ${cycle.key}`,
         );
       }
-      // A billing cycle is always one "Virtual Accounting" line.
-      dealForEstimate = { ...deal, lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price }] };
+      // The quote's line is named after the HubSpot line item that priced
+      // it (decision 2026-09-29 — the accountant's own name, e.g. "All VA
+      // Services"), with a cloned item's accumulated "(Copy)" suffix
+      // stripped, falling back to "Virtual Accounting" only when there is
+      // no matching item to name it after.
+      const quoteLineName = (latest?.name && cleanLineItemName(latest.name)) || "Virtual Accounting";
+      dealForEstimate = { ...deal, lineItems: [{ id: "", name: quoteLineName, quantity: 1, price }] };
     } else {
       if (latest && latest.price > 0) {
-        dealForEstimate = { ...deal, lineItems: [latest] };
+        dealForEstimate = { ...deal, lineItems: [{ ...latest, name: cleanLineItemName(latest.name) }] };
       } else if (basePrice !== null) {
         const firstLineItem = latest ?? deal.lineItems[0];
         dealForEstimate = {
@@ -110,7 +116,7 @@ export async function createZohoEstimate(
           lineItems: [
             {
               id: firstLineItem?.id ?? "",
-              name: firstLineItem?.name ?? deal.dealName,
+              name: cleanLineItemName(firstLineItem?.name) ?? deal.dealName,
               quantity: firstLineItem?.quantity ?? 1,
               price: basePrice,
             },

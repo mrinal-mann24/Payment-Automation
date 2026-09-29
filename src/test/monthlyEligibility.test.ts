@@ -1,6 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { classifyDeal, cycleLabel, termMonths } from "../utils/monthlyEligibility.js";
+import { classifyDeal, cleanLineItemName, cycleLabel, termMonths } from "../utils/monthlyEligibility.js";
 import type { HubspotLineItem } from "../clients/hubspot.js";
+
+// Accountants clone last cycle's line item to make the next one; HubSpot
+// appends " (Copy)" each time and nobody renames it (live data, 2026-09-29:
+// "All VA Services (Copy) (Copy) (Copy) (Copy) (Copy) (Copy)"). That text
+// must never reach a client's quote as the billed item's name.
+describe("cleanLineItemName", () => {
+  it("strips one or many trailing HubSpot \"(Copy)\" suffixes", () => {
+    expect(cleanLineItemName("All VA Services")).toBe("All VA Services");
+    expect(cleanLineItemName("All VA Services (Copy)")).toBe("All VA Services");
+    expect(cleanLineItemName("All VA Services (Copy) (Copy) (Copy) (Copy) (Copy) (Copy)")).toBe("All VA Services");
+    expect(cleanLineItemName("Bookkeeping + GST + TDS Services VA (Copy) (Copy)")).toBe(
+      "Bookkeeping + GST + TDS Services VA",
+    );
+  });
+
+  it("leaves a name that only contains \"(Copy)\" alone rather than returning blank", () => {
+    expect(cleanLineItemName("(Copy)")).toBe("(Copy)");
+    expect(cleanLineItemName("(Copy) (Copy)")).toBe("(Copy) (Copy)");
+  });
+
+  it("passes null and undefined through unchanged", () => {
+    expect(cleanLineItemName(null)).toBeNull();
+    expect(cleanLineItemName(undefined)).toBeUndefined();
+  });
+});
 
 const item = (overrides: Partial<HubspotLineItem> = {}): HubspotLineItem => ({
   id: "li-1",

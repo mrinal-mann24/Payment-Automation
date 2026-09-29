@@ -126,6 +126,16 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-29 (quote line name from HubSpot, "(Copy)" stripped) — The
+  Zoho quote's line NAME is now the priced HubSpot line item's own Name
+  (e.g. "All VA Services") instead of a hardcoded "Virtual Accounting"
+  (mirrors the pattern already used in `markRenewalDone.ts`). A cloned
+  item's accumulated HubSpot "(Copy)" suffix is stripped first
+  (`cleanLineItemName`) — **live check found most clients' priced line
+  item literally named "… (Copy) (Copy) (Copy) (Copy) (Copy) (Copy)"**
+  because the accountant clones last cycle's item and nobody renames it;
+  unstripped this would have reached every client. 240/240; re-verified
+  live for all 13 clients due 1 October — every quote name is now clean.
 - 2026-09-29 (narration from the HubSpot line item) — The Zoho quote
   line's narration (`description`) now comes from the accountant's own
   Description field on the priced HubSpot line item, when set; blank

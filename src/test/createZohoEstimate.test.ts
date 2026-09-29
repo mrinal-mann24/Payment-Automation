@@ -453,3 +453,80 @@ describe("createZohoEstimate — narration from the HubSpot line item", () => {
     }
   });
 });
+
+describe("createZohoEstimate — the quote's line name is the HubSpot line item's Name", () => {
+  it("bills under the HubSpot line item's own Name (e.g. \"All VA Services\"), not the hardcoded \"Virtual Accounting\"", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      ...fakeDeal,
+      lineItems: [
+        {
+          id: "li-1",
+          name: "All VA Services",
+          quantity: 1,
+          price: 40000,
+          billingStartDate: "2026-09-01",
+          billingPeriodTerm: "P1M",
+        },
+      ],
+    });
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
+    vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+    vi.mocked(findOrCreateCustomer).mockResolvedValue("zcust-1");
+    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-9", estimateNumber: "QT-9", total: 43200 });
+
+    await createZohoEstimate(fakeSupabase, "deal-1", { ...octoberCycle, amount: 40000 });
+
+    expect(createEstimate).toHaveBeenCalledWith(
+      "zcust-1",
+      expect.objectContaining({ lineItems: [expect.objectContaining({ name: "All VA Services", price: 40000, quantity: 1 })] }),
+      expect.anything(),
+    );
+  });
+
+  it("strips a cloned line item's accumulated \"(Copy)\" suffix from the quote's line name", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      ...fakeDeal,
+      lineItems: [
+        {
+          id: "li-1",
+          name: "All VA Services (Copy) (Copy) (Copy) (Copy) (Copy) (Copy)",
+          quantity: 1,
+          price: 5000,
+          billingStartDate: "2026-09-01",
+          billingPeriodTerm: "P1M",
+        },
+      ],
+    });
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
+    vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+    vi.mocked(findOrCreateCustomer).mockResolvedValue("zcust-1");
+    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-9", estimateNumber: "QT-9", total: 5400 });
+
+    await createZohoEstimate(fakeSupabase, "deal-1", octoberCycle);
+
+    expect(createEstimate).toHaveBeenCalledWith(
+      "zcust-1",
+      expect.objectContaining({ lineItems: [expect.objectContaining({ name: "All VA Services" })] }),
+      expect.anything(),
+    );
+  });
+
+  it("falls back to \"Virtual Accounting\" when there is no matching HubSpot line item to name it after", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue(fakeDeal); // no billingStartDate/term on its line item
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
+    vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+    vi.mocked(findOrCreateCustomer).mockResolvedValue("zcust-1");
+    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-9", estimateNumber: "QT-9", total: 5400 });
+
+    await createZohoEstimate(fakeSupabase, "deal-1", octoberCycle);
+
+    expect(createEstimate).toHaveBeenCalledWith(
+      "zcust-1",
+      expect.objectContaining({ lineItems: [expect.objectContaining({ name: "Virtual Accounting" })] }),
+      expect.anything(),
+    );
+  });
+});

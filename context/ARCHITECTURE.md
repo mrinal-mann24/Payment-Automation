@@ -747,9 +747,19 @@ existing steps; there is no new table and no second state machine.
   legacy quote; ~5 s between deals. The legacy `runRenewalCheck(cycleDealIds,
   now)` skips every deal a cycle owns. Shared step sequence:
   `src/jobs/renewalPipeline.ts`.
-- **Quote content** (`createEstimate(customerId, deal, line)`): one line
-  `name: "Virtual Accounting"`, quantity 1, rate from the price source in
-  §3.8's "Price source" bullet above. **Narration (decision 2026-09-29)**:
+- **Quote content** (`createEstimate(customerId, deal, line)`): one line,
+  quantity 1, rate from the price source in §3.8's "Price source" bullet
+  above. **Line name (decision 2026-09-29)**: the priced HubSpot line
+  item's own Name (e.g. "All VA Services"), not a hardcoded
+  "Virtual Accounting" — that string is now only the fallback when there
+  is no matching HubSpot line item. A cloned item's accumulated HubSpot
+  "(Copy)" suffix is stripped first (`cleanLineItemName`,
+  `src/utils/monthlyEligibility.ts`) — **live data, 2026-09-29: most
+  clients' priced line item is named like "All VA Services (Copy) (Copy)
+  (Copy) (Copy) (Copy) (Copy)"**, because the accountant clones last
+  cycle's item to make the next one and nobody renames it; unstripped,
+  that text would reach the client verbatim. Applies to the legacy yearly
+  path too. **Narration (decision 2026-09-29)**:
   `description` is the priced HubSpot line item's own Description field
   when the accountant has typed one there (trimmed, non-blank); otherwise
   the auto-generated "Service period: <start> to <end>" text, unchanged

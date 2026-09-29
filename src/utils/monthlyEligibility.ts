@@ -64,6 +64,24 @@ export function latestRecurringLineItem<T extends Pick<HubspotLineItem, "billing
   return latest;
 }
 
+// The accountant renews a client by cloning last cycle's line item;
+// HubSpot appends " (Copy)" to the name each time and nobody renames it
+// (decision 2026-09-29, after live data showed names like "All VA
+// Services (Copy) (Copy) (Copy) (Copy) (Copy) (Copy)"). Strips a trailing
+// run of that suffix before a name is used as the quote's line item name —
+// but never down to nothing, so a name that is only "(Copy)" is left as is
+// rather than sent blank.
+export function cleanLineItemName(name: string): string;
+export function cleanLineItemName(name: string | null): string | null;
+export function cleanLineItemName(name: string | undefined): string | undefined;
+export function cleanLineItemName(name: string | null | undefined): string | null | undefined {
+  if (!name) {
+    return name;
+  }
+  const stripped = name.replace(/(\s*\(Copy\))+$/, "").trim();
+  return stripped || name;
+}
+
 // `today` is the IST date (YYYY-MM-DD) of the tick or request.
 export function classifyDeal(
   deal: Pick<VaDealWithLineItems, "lineItems" | "lineItemsError" | "nextRenewalDate">,
