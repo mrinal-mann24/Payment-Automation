@@ -126,6 +126,15 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-29 (narration from the HubSpot line item) — The Zoho quote
+  line's narration (`description`) now comes from the accountant's own
+  Description field on the priced HubSpot line item, when set; blank
+  falls back to the existing auto-generated "Service period: …" text.
+  New `HubspotLineItem.description`, fetched via `LINE_ITEM_PROPERTIES`.
+  234/234. **Live check found 4 of 26 clients' line items carry an
+  internal note ("Prior Cleanup needed for Zoho") that would now reach
+  the client verbatim** — flagged to the business, needs cleanup in
+  HubSpot before 1 October.
 - 2026-09-28 (message wording) — The business's wording for the quote,
   the invoice and the three reminders is now used on WhatsApp and email,
   from one module (`src/utils/messages.ts`). The period is named by month

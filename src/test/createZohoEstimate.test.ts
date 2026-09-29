@@ -396,3 +396,60 @@ describe("createZohoEstimate — HubSpot price first, base price as the fallback
     expect(billed[0]).toMatchObject({ name: "All VA Services", price: 45000, quantity: 1 });
   });
 });
+
+describe("createZohoEstimate — narration from the HubSpot line item", () => {
+  it("uses the line item's own Description as the quote's narration, instead of the auto-generated service period text", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      ...fakeDeal,
+      lineItems: [
+        {
+          id: "li-1",
+          name: "VA Monthly",
+          quantity: 1,
+          price: 5000,
+          billingStartDate: "2026-09-01",
+          billingPeriodTerm: "P1M",
+          description: "GST filing + book keeping for September",
+        },
+      ],
+    });
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
+    vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+    vi.mocked(findOrCreateCustomer).mockResolvedValue("zcust-1");
+    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-9", estimateNumber: "QT-9", total: 5400 });
+
+    await createZohoEstimate(fakeSupabase, "deal-1", octoberCycle);
+
+    expect(createEstimate).toHaveBeenCalledWith(
+      "zcust-1",
+      expect.anything(),
+      { key: "2026-10", description: "GST filing + book keeping for September" },
+    );
+  });
+
+  it("falls back to the service period text when the line item has no narration, or only blank space", async () => {
+    const noNarration: Array<Partial<{ description: string | null }>> = [{ description: null }, {}, { description: "   " }];
+    for (const override of noNarration) {
+      vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+        ...fakeDeal,
+        lineItems: [
+          { id: "li-1", name: "VA Monthly", quantity: 1, price: 5000, billingStartDate: "2026-09-01", billingPeriodTerm: "P1M", ...override },
+        ],
+      });
+      vi.mocked(findRenewalJob).mockResolvedValue(null);
+      vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
+      vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+      vi.mocked(findOrCreateCustomer).mockResolvedValue("zcust-1");
+      vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-9", estimateNumber: "QT-9", total: 5400 });
+
+      await createZohoEstimate(fakeSupabase, "deal-1", octoberCycle);
+
+      expect(createEstimate).toHaveBeenLastCalledWith(
+        "zcust-1",
+        expect.anything(),
+        { key: "2026-10", description: octoberCycle.period.narration },
+      );
+    }
+  });
+});

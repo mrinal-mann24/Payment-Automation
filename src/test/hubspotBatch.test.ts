@@ -25,6 +25,7 @@ const fullItemProperties = {
   billing_term_end_date: "1790812800000",
   recurring_revenue_type: "Renewal",
   hs_product_id: "285430818522",
+  description: "GST filing + book keeping for September",
 };
 
 describe("fetchVaDealsWithLineItems", () => {
@@ -74,7 +75,31 @@ describe("fetchVaDealsWithLineItems", () => {
       billingTermEndDate: "2026-10-01",
       recurringRevenueType: "Renewal",
       productId: "285430818522",
+      description: "GST filing + book keeping for September",
     });
+  });
+
+  it("reads no narration when the line item's Description is blank", async () => {
+    global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/crm/v3/objects/deals/search")) {
+        return jsonResponse({
+          results: [{ id: "d1", properties: { dealname: "One <> VA", dealstage: "3102360263", billing_cycle: "Monthly", next_renewal_date: "2026-10-01" } }],
+        });
+      }
+      if (path.endsWith("/crm/v4/associations/deals/line_items/batch/read")) {
+        return jsonResponse({ results: [{ from: { id: "d1" }, to: [{ toObjectId: 1 }] }] }, 207);
+      }
+      if (path.endsWith("/crm/v3/objects/line_items/batch/read")) {
+        const body = JSON.parse(String(init?.body)) as { inputs: Array<{ id: string }> };
+        return jsonResponse({ results: body.inputs.map(({ id }) => ({ id, properties: { ...fullItemProperties, description: undefined } })) });
+      }
+      throw new Error(`Unexpected fetch: ${path}`);
+    }) as unknown as typeof fetch;
+
+    const deals = await fetchVaDealsWithLineItems();
+
+    expect(deals[0]!.lineItems[0]!.description).toBeNull();
   });
 
   it("records a per-deal error instead of failing the whole listing when a line item is malformed", async () => {

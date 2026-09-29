@@ -83,6 +83,12 @@ export async function createZohoEstimate(
     // (src/steps/createAdditionCharge.ts), never folded into the renewal.
     const pricing = await findClientPricing(supabase, dealId);
     const basePrice = pricing?.base_price ?? null;
+    // The line item that prices this cycle is also where its narration
+    // comes from: the accountant's own Description on it, when set
+    // (decision 2026-09-29). Blank/whitespace falls back to the
+    // auto-generated service-period text, unchanged from before.
+    const latest = latestRecurringLineItem(deal.lineItems);
+    const narration = latest?.description?.trim() || undefined;
 
     let dealForEstimate = deal;
     if (cycle) {
@@ -95,7 +101,6 @@ export async function createZohoEstimate(
       // A billing cycle is always one "Virtual Accounting" line.
       dealForEstimate = { ...deal, lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price }] };
     } else {
-      const latest = latestRecurringLineItem(deal.lineItems);
       if (latest && latest.price > 0) {
         dealForEstimate = { ...deal, lineItems: [latest] };
       } else if (basePrice !== null) {
@@ -115,7 +120,7 @@ export async function createZohoEstimate(
     }
 
     const customerId = await findOrCreateCustomer(deal.contactEmail, deal.contactName);
-    const estimateLine = cycle ? { key: cycle.key, description: cycle.period.narration } : undefined;
+    const estimateLine = cycle ? { key: cycle.key, description: narration ?? cycle.period.narration } : undefined;
     const { estimateId, estimateNumber, total } = await createEstimate(customerId, dealForEstimate, estimateLine);
 
     // createEstimate has already thrown if there was no line item to bill.

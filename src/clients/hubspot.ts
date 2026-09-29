@@ -18,6 +18,11 @@ export interface HubspotLineItem {
   billingTermEndDate?: string | null;
   recurringRevenueType?: string | null;
   productId?: string | null;
+  // The line item's own Description (HubSpot: "description") — the
+  // accountant's narration for what is being billed. Used as the Zoho
+  // quote line's narration when set; the auto-generated "Service period:
+  // …" text is the fallback (decision 2026-09-29).
+  description?: string | null;
 }
 
 const LINE_ITEM_PROPERTIES = [
@@ -30,6 +35,7 @@ const LINE_ITEM_PROPERTIES = [
   "billing_term_end_date",
   "recurring_revenue_type",
   "hs_product_id",
+  "description",
 ];
 
 export interface HubspotDeal {
@@ -92,6 +98,7 @@ interface HubspotLineItemResponse {
     billing_term_end_date?: string | null;
     recurring_revenue_type?: string | null;
     hs_product_id?: string | null;
+    description?: string | null;
   };
 }
 
@@ -213,6 +220,7 @@ function parseLineItem(dealId: string, item: HubspotLineItemResponse): HubspotLi
     billingTermEndDate: toIsoDate(item.properties.billing_term_end_date),
     recurringRevenueType: item.properties.recurring_revenue_type ?? null,
     productId: item.properties.hs_product_id ?? null,
+    description: item.properties.description ?? null,
   };
 }
 

@@ -748,12 +748,21 @@ existing steps; there is no new table and no second state machine.
   now)` skips every deal a cycle owns. Shared step sequence:
   `src/jobs/renewalPipeline.ts`.
 - **Quote content** (`createEstimate(customerId, deal, line)`): one line
-  `name: "Virtual Accounting"` with the service period as `description`,
-  quantity 1. Rate = `client_pricing.base_price` for a monthly cycle (it
-  refuses to bill without a pricing row rather than guess) and the
-  last-paid amount for a term. `reference_number = "<dealId>/<key>"`.
+  `name: "Virtual Accounting"`, quantity 1, rate from the price source in
+  §3.8's "Price source" bullet above. **Narration (decision 2026-09-29)**:
+  `description` is the priced HubSpot line item's own Description field
+  when the accountant has typed one there (trimmed, non-blank); otherwise
+  the auto-generated "Service period: <start> to <end>" text, unchanged
+  from before (`src/steps/createZohoEstimate.ts`, `HubspotLineItem.description`,
+  fetched via `LINE_ITEM_PROPERTIES`). `reference_number = "<dealId>/<key>"`.
   `billed_price` = the pre-tax amount of the quote. The invoice inherits
   the line through conversion. No quote-time log-back line item to HubSpot.
+  **Live data check (2026-09-29): 4 of 26 clients' priced line items carry
+  "Prior Cleanup needed for Zoho"** — an internal note, not client-facing
+  text — which would now go out on their quote verbatim. Flagged to the
+  business; those line items' Description fields need cleaning up in
+  HubSpot before 1 October, or this feature needs to be turned off for
+  narration that looks internal.
 - **Delivery**: WhatsApp to `clients.whatsapp_group_id` (a table owned by
   another system in the same Supabase project, read-only via
   `src/repositories/clients.ts`; bare 18-digit ids become `<id>@g.us`;
