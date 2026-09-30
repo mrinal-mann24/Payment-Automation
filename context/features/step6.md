@@ -23,9 +23,14 @@ unchanged for yearly customers and deals with no usable line item.
   cycle length, so the next quote needs no manual entry.
 - **No "Quote now" button.** Quotes are automatic at 11:00 IST; the only
   on-demand path is the secret-protected `POST /webhooks/renewal`.
-- **Reminders** on days 5, 7 and 9 of the cycle counted from its start
-  (the 5th/7th/9th for a cycle starting on the 1st); stop the moment it is
-  paid.
+- **Reminders (2026-09-29)** on days 5, 9 and 12 of the cycle counted from
+  its start (stage 2 and 3 share identical wording); a due date that falls
+  on a Sunday shifts to the following Monday; stop the moment it is paid.
+  Each message greets the client by name ("Hi `<Name>`") when the admin has
+  set one on `client_pricing.client_name`, else "Hi Team". A reminder also
+  gets an arrears line when the client is 2+ months behind, counted from
+  `client_pricing.pending_since_override` if set, else the open unpaid
+  cycle's own start date (`monthsPendingSince`).
 - **Delivery:** quote and invoice go to the client's WhatsApp **group**
   (`clients.whatsapp_group_id`, contact phone as fallback) and by email
   through Zoho Books' own email API to every address in the deal's
@@ -60,6 +65,13 @@ unchanged for yearly customers and deals with no usable line item.
   legacy cron.
 - **Sender (2026-09-23):** quote and invoice emails go out from the Zoho
   organisation email, to be set to accounts@aiaccountant.com in Zoho.
+- **Quote line name (2026-09-30):** every cycle quote's line is
+  "Virtual Accounting" for every deal; the HubSpot line item's own name is
+  not used (a one-day experiment on 2026-09-29, reversed).
+- **WhatsApp group on the admin page (2026-09-30):** the Clients table
+  shows and edits `clients.whatsapp_group_id` per deal
+  (`POST /admin/pricing/whatsapp-group`). Delivery rule unchanged: the
+  group when set, the contact's phone otherwise.
 - **Admin auth:** left open (business decision, see `ARCHITECTURE.md` §3.7c).
 
 ## 2. Requirements (EARS)
@@ -97,11 +109,22 @@ unchanged for yearly customers and deals with no usable line item.
   entered, price = the amount billed, adopting an item the team already
   entered for the same start date, and SHALL set the deal's Next Renewal
   Date to the day after the paid period.
-- REQ-6.6 On days 5–6 / 7–8 / 9–10 of a cycle, counted from its start date,
-  the system SHALL send reminder 1 / 2 / 3 to each unpaid cycle, at most
-  once per stage, claiming the stage atomically (`reminder_N_sent_at IS
-  NULL AND paid_at IS NULL`) immediately before sending; a paid cycle SHALL
-  never be reminded; a link Razorpay reports as paid SHALL be settled instead.
+- REQ-6.6 On day 5 (+1 grace day) / day 9 (+1) / day 12 (+1) of a cycle,
+  counted from its start date and each shifted to the following Monday when
+  it lands on a Sunday, the system SHALL send reminder 1 / 2 / 3 to each
+  unpaid cycle, at most once per stage, claiming the stage atomically
+  (`reminder_N_sent_at IS NULL AND paid_at IS NULL`) immediately before
+  sending; a paid cycle SHALL never be reminded; a link Razorpay reports as
+  paid SHALL be settled instead.
+- REQ-6.10 Every quote, invoice, reminder and one-time-quote message SHALL
+  greet the client by `client_pricing.client_name` ("Hi `<Name>`") when
+  set, else "Hi Team". A reminder SHALL additionally include an arrears
+  line stating the number of months pending when that count (computed by
+  `monthsPendingSince` from the effective pending-since date — the admin's
+  `client_pricing.pending_since_override` if set, else the deal's one open
+  unpaid cycle's `service_period_start`) is 2 or more; the admin SHALL be
+  able to view and override the pending-since date and the client name on
+  the admin page.
 - REQ-6.7 A one-time quote SHALL create its own Zoho estimate (line named
   after the service, narration as description) and Razorpay link, send the
   PDF to the WhatsApp group (phone fallback) and email it with the link
@@ -122,9 +145,11 @@ unchanged for yearly customers and deals with no usable line item.
 `src/steps/sendInvoiceEmail.ts`, `src/steps/whatsappRecipient.ts`,
 `src/repositories/clients.ts`, `src/steps/createAdditionCharge.ts`,
 `src/steps/sendAdditionInvoiceEmail.ts`, `src/routes/pricingAdmin.ts`,
-`src/routes/pricingAdminPage.ts`, migrations
-`0010_renewal_jobs_monthly_billing.sql` and
-`0011_term_cycles_and_addition_delivery.sql`.
+`src/routes/pricingAdminPage.ts`, `src/utils/messages.ts`,
+`src/repositories/clientPricing.ts`, migrations
+`0010_renewal_jobs_monthly_billing.sql`,
+`0011_term_cycles_and_addition_delivery.sql` and
+`0014_client_pricing_name_and_pending_since.sql`.
 
 ## 4. Open items
 - Live verification of the Zoho email API behaviour (PDF attachment,
@@ -135,3 +160,7 @@ unchanged for yearly customers and deals with no usable line item.
   are quoted only once the team sets it; three deals have no dated line
   item; every
   Accountant Email is empty (WhatsApp only until filled).
+- The arrears-line wording and the 2-month threshold (REQ-6.10) are
+  proposed, not given verbatim by the business — confirm before relying on
+  it. Whether the arrears line should also appear on quotes/invoices, or
+  reminders only (current scope), is likewise unconfirmed.

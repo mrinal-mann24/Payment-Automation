@@ -12,10 +12,14 @@ vi.mock("../repositories/renewalJobs.js", () => ({
   markEstimateEmailSent: vi.fn(),
   markEmailError: vi.fn(),
 }));
+vi.mock("../repositories/clientPricing.js", () => ({
+  findClientPricing: vi.fn(),
+}));
 
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailEstimate } from "../clients/zoho.js";
 import { findRenewalJob, markEmailError, markEstimateEmailSent } from "../repositories/renewalJobs.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { sendQuoteEmail } from "../steps/sendQuoteEmail.js";
 
 const fakeSupabase = {} as SupabaseClient;
@@ -77,6 +81,7 @@ const fakeDeal = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue(fakeDeal);
+  vi.mocked(findClientPricing).mockResolvedValue(null);
 });
 
 describe("sendQuoteEmail", () => {
@@ -93,6 +98,25 @@ describe("sendQuoteEmail", () => {
     });
     expect(vi.mocked(emailEstimate).mock.calls[0]![1].body).toContain("Pay online: https://rzp.io/i/1");
     expect(markEstimateEmailSent).toHaveBeenCalledWith(fakeSupabase, "job-1");
+  });
+
+  it("greets the client by name when client_pricing.client_name is set", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(findClientPricing).mockResolvedValue({
+      id: "p-1",
+      hubspot_deal_id: "deal-1",
+      deal_name: null,
+      base_price: null,
+      auto_quote: true,
+      client_name: "Rajesh",
+      pending_since_override: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    await sendQuoteEmail(fakeSupabase, "deal-1", "2026-10");
+
+    expect(vi.mocked(emailEstimate).mock.calls[0]![1].body).toContain("Hi Rajesh,");
   });
 
   it("is idempotent once estimate_email_sent is set", async () => {

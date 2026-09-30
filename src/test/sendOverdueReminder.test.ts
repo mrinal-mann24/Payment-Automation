@@ -19,8 +19,13 @@ vi.mock("../repositories/clients.js", () => ({
   findWhatsappGroupId: vi.fn(),
 }));
 
+vi.mock("../repositories/clientPricing.js", () => ({
+  findClientPricing: vi.fn(),
+}));
+
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { findWhatsappGroupId } from "../repositories/clients.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { isValidWhatsappRecipient, sendTextMessage } from "../clients/periskope.js";
 import { claimReminder, findRenewalJob, markReminderSkipped, releaseReminder } from "../repositories/renewalJobs.js";
 import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
@@ -80,18 +85,21 @@ const fakeDeal = {
   lineItems: [{ id: "li-1", name: "Service", quantity: 1, price: 1000 }],
 };
 
+const TODAY = "2026-07-15";
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isValidWhatsappRecipient).mockReturnValue(true);
   vi.mocked(findWhatsappGroupId).mockResolvedValue(null);
   vi.mocked(claimReminder).mockResolvedValue(true);
+  vi.mocked(findClientPricing).mockResolvedValue(null);
 });
 
 describe("sendOverdueReminder", () => {
   it("refuses to run when razorpay_step_status is not done (REQ-5.1)", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, razorpay_step_status: "pending" });
 
-    await expect(sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1)).rejects.toThrow(
+    await expect(sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY)).rejects.toThrow(
       /razorpay_step_status is not "done"/,
     );
     expect(fetchDealWithLineItemsAndContact).not.toHaveBeenCalled();
@@ -100,7 +108,7 @@ describe("sendOverdueReminder", () => {
   it("does nothing once invoice_step_status is done (REQ-5.7)", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, invoice_step_status: "done" });
 
-    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
+    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
 
     expect(result).toEqual({ sent: false, skipReason: null });
     expect(sendTextMessage).not.toHaveBeenCalled();
@@ -110,7 +118,7 @@ describe("sendOverdueReminder", () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal, contactPhone: null });
 
-    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
+    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
 
     expect(result.sent).toBe(false);
     expect(result.skipReason).toMatch(/No WhatsApp identifier/);
@@ -122,22 +130,22 @@ describe("sendOverdueReminder", () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
 
-    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
+    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
 
     expect(result).toEqual({ sent: true, skipReason: null });
     expect(sendTextMessage).toHaveBeenCalledWith("919876543210", expect.stringContaining("https://rzp.io/i/1"));
     expect(claimReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 1);
   });
 
-  it("sends reminder 3 as the final follow-up (REQ-5.4)", async () => {
+  it("sends reminder 3 with the follow-up wording (REQ-5.4)", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
 
-    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 3);
+    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 3, TODAY);
 
     expect(sendTextMessage).toHaveBeenCalledWith(
       "919876543210",
-      expect.stringContaining("this is a final follow-up regarding the pending payment"),
+      expect.stringContaining("following up regarding the pending payment"),
     );
     expect(claimReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 3);
   });
@@ -148,7 +156,7 @@ describe("sendOverdueReminder", () => {
       reminder_1_sent_at: "2026-07-12T06:00:00Z",
     });
 
-    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
+    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
 
     expect(result).toEqual({ sent: true, skipReason: null });
     expect(sendTextMessage).not.toHaveBeenCalled();
@@ -161,7 +169,7 @@ describe("sendOverdueReminder recipient", () => {
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
     vi.mocked(findWhatsappGroupId).mockResolvedValue("120363012345678901");
 
-    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
+    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
 
     expect(sendTextMessage).toHaveBeenCalledWith("120363012345678901", expect.any(String));
   });
@@ -171,7 +179,7 @@ describe("sendOverdueReminder claim-before-send", () => {
   it("never reminds a cycle that has been paid (TEST 5, TEST 6)", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, paid_at: "2026-10-06T04:00:00Z", payment_method: "yes_bank" });
 
-    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 2);
+    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 2, TODAY);
 
     expect(result).toEqual({ sent: false, skipReason: null });
     expect(sendTextMessage).not.toHaveBeenCalled();
@@ -183,7 +191,7 @@ describe("sendOverdueReminder claim-before-send", () => {
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
     vi.mocked(claimReminder).mockResolvedValue(false);
 
-    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1);
+    const result = await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
 
     expect(result.sent).toBe(false);
     expect(sendTextMessage).not.toHaveBeenCalled();
@@ -192,11 +200,79 @@ describe("sendOverdueReminder claim-before-send", () => {
   it("releases the claim when the WhatsApp send throws so the next run retries", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
-    vi.mocked(sendTextMessage).mockRejectedValue(new Error("Periskope API error 500"));
+    vi.mocked(sendTextMessage).mockRejectedValueOnce(new Error("Periskope API error 500"));
 
-    await expect(sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1)).rejects.toThrow(/500/);
+    await expect(sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY)).rejects.toThrow(/500/);
 
     expect(claimReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 1);
     expect(releaseReminder).toHaveBeenCalledWith(fakeSupabase, "job-1", 1);
+  });
+});
+
+describe("sendOverdueReminder — name and arrears", () => {
+  const cycleJob = { ...baseJob, service_period_start: "2026-05-01", term_months: 1 };
+
+  it("greets the client by name when client_pricing.client_name is set, else 'Hi Team'", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...cycleJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(findClientPricing).mockResolvedValue({
+      id: "p-1",
+      hubspot_deal_id: "deal-1",
+      deal_name: null,
+      base_price: null,
+      auto_quote: true,
+      client_name: "Rajesh",
+      pending_since_override: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
+
+    expect(sendTextMessage).toHaveBeenCalledWith("919876543210", expect.stringContaining("Hi Rajesh,"));
+  });
+
+  it("includes an arrears line, computed from the job's own service period, once 2 or more months are pending", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...cycleJob }); // pending since 1 May, TODAY = 15 July -> 2 full months
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+
+    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
+
+    expect(sendTextMessage).toHaveBeenCalledWith(
+      "919876543210",
+      expect.stringContaining("You currently have pending payments for the last 2 months (since May 2026)."),
+    );
+  });
+
+  it("says nothing about arrears when fewer than 2 months are pending", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...cycleJob, service_period_start: "2026-07-01" }); // due this cycle only
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+
+    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
+
+    expect(sendTextMessage).toHaveBeenCalledWith("919876543210", expect.not.stringContaining("pending payments for the last"));
+  });
+
+  it("uses the admin's pending-since override instead of the job's own service period, when set", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...cycleJob }); // job's own period would give 2 months
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(findClientPricing).mockResolvedValue({
+      id: "p-1",
+      hubspot_deal_id: "deal-1",
+      deal_name: null,
+      base_price: null,
+      auto_quote: true,
+      client_name: null,
+      pending_since_override: "2026-01-01", // 6 months pending as of 15 July
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
+
+    expect(sendTextMessage).toHaveBeenCalledWith(
+      "919876543210",
+      expect.stringContaining("You currently have pending payments for the last 6 months (since January 2026)."),
+    );
   });
 });

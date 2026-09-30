@@ -3,6 +3,7 @@ import { asEmailHtml, invoiceMessage, periodLabel } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailInvoice } from "../clients/zoho.js";
 import { findRenewalJob, markEmailError, markInvoiceEmailSent } from "../repositories/renewalJobs.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import type { SendEmailResult } from "./sendQuoteEmail.js";
 
 // Best-effort, same contract as sendQuoteEmail: failures are recorded and
@@ -33,11 +34,12 @@ export async function sendInvoiceEmail(
       return { sent: false, error: "no Accountant Email on the HubSpot deal" };
     }
     const period = job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null;
+    const pricing = await findClientPricing(supabase, dealId);
 
     await emailInvoice(job.zoho_invoice_id, {
       to: deal.billingEmails,
       subject: `Payment received — invoice ${job.zoho_invoice_number}`,
-      body: asEmailHtml(invoiceMessage(period)),
+      body: asEmailHtml(invoiceMessage(period, pricing?.client_name || null)),
     });
 
     await markInvoiceEmailSent(supabase, job.id);

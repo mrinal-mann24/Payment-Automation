@@ -1,6 +1,6 @@
 # Architecture — renewal billing automation
 
-Last updated: 2026-09-22 (monthly billing cycles for VA customers: calendar-month quotes with a service-period narration, WhatsApp-group + Zoho-email delivery, one settlement path for Razorpay / Yes Bank / manual payments, 5th/7th/9th IST reminders re-enabled, admin billing-cycle view — see §3.8)
+Last updated: 2026-09-29 (5th/9th/12th IST reminders with a Sunday shift, per-client arrears tracking with an admin override, and a per-client name used to greet the client in every message — see §3.7b, §3.8)
 
 ## 1. Problem this replaces
 Today an accountant creates the Razorpay link, creates the Zoho quote,
@@ -451,6 +451,9 @@ same day)
 | hubspot_deal_id | text | unique — one row per deal, not per billing period |
 | deal_name | text \| null | denormalized copy of the HubSpot deal name at save time, purely for readability when querying `client_pricing` directly — not authoritative (HubSpot's `dealname` property is); populated by the admin interface's Save action (`POST /admin/pricing/base-price`, `dealName` is optional in the request), not auto-kept-in-sync if the deal is later renamed in HubSpot |
 | base_price | numeric | the renewal price to bill, replacing HubSpot's `lineItems[0].price` when a row exists |
+| auto_quote | boolean | default true; admin pause switch (added migration 0013, see below) |
+| client_name | text \| null | added migration 0014 (2026-09-29); the name used to greet the client ("Hi `<Name>`") in every message; always null until the admin types it on the admin page — never auto-filled from HubSpot |
+| pending_since_override | date \| null | added migration 0014 (2026-09-29); admin override for the date arrears are counted from; the auto default (never stored) is the deal's one open unpaid cycle's `service_period_start` — see §3.8's reminders bullet |
 | created_at / updated_at | timestamptz | |
 
 **Backfilled 2026-07-31**: all 27 existing rows (seeded before this
@@ -749,17 +752,16 @@ existing steps; there is no new table and no second state machine.
   `src/jobs/renewalPipeline.ts`.
 - **Quote content** (`createEstimate(customerId, deal, line)`): one line,
   quantity 1, rate from the price source in §3.8's "Price source" bullet
-  above. **Line name (decision 2026-09-29)**: the priced HubSpot line
-  item's own Name (e.g. "All VA Services"), not a hardcoded
-  "Virtual Accounting" — that string is now only the fallback when there
-  is no matching HubSpot line item. A cloned item's accumulated HubSpot
-  "(Copy)" suffix is stripped first (`cleanLineItemName`,
-  `src/utils/monthlyEligibility.ts`) — **live data, 2026-09-29: most
-  clients' priced line item is named like "All VA Services (Copy) (Copy)
-  (Copy) (Copy) (Copy) (Copy)"**, because the accountant clones last
-  cycle's item to make the next one and nobody renames it; unstripped,
-  that text would reach the client verbatim. Applies to the legacy yearly
-  path too. **Narration (decision 2026-09-29)**:
+  above. **Line name (decision 2026-09-30)**: always "Virtual Accounting"
+  for every cycle quote. (On 2026-09-29 it was briefly the priced HubSpot
+  line item's own Name, e.g. "All VA Services" — reversed the next day by
+  the business.) The legacy yearly path still bills the HubSpot item under
+  its own name, with a cloned item's accumulated "(Copy)" suffix stripped
+  (`cleanLineItemName`, `src/utils/monthlyEligibility.ts`) — **live data,
+  2026-09-29: most clients' priced line item is named like "All VA
+  Services (Copy) (Copy) (Copy) (Copy) (Copy) (Copy)"**, because the
+  accountant clones last cycle's item to make the next one and nobody
+  renames it. **Narration (decision 2026-09-29)**:
   `description` is the priced HubSpot line item's own Description field
   when the accountant has typed one there (trimmed, non-blank); otherwise
   the auto-generated "Service period: <start> to <end>" text, unchanged
@@ -829,14 +831,23 @@ existing steps; there is no new table and no second state machine.
 - **Reminders** (`src/jobs/reminderCron.ts`): every unpaid cycle with a
   service period (`findUnpaidCycleJobs`: `service_period_start` set,
   `razorpay_step_status = done`, `paid_at IS NULL`) gets its stage from its
-  **own start date** — days 5–6 / 7–8 / 9–10 of the cycle → stage 1 / 2 / 3,
-  i.e. the 5th/7th/9th of the month for a cycle starting on the 1st and
-  4 / 6 / 8 days after the quote otherwise. One stage per run, one-day
-  grace for a missed tick. `claimReminder` stamps `reminder_N_sent_at` only
-  while unsent AND unpaid, right before the send; `releaseReminder` on a
-  failed send. A link Razorpay reports as paid is settled instead of
-  reminded. Legacy rows are never reminded. Copy matches the business
-  flowchart.
+  **own start date** — days 5, 9 and 12 of the cycle → stage 1 / 2 / 3
+  (`dueDateForStage`), shifted to the following Monday when the raw due date
+  is a Sunday (`isSunday`), plus a one-day grace window on the (possibly
+  shifted) date. `claimReminder` stamps `reminder_N_sent_at` only while
+  unsent AND unpaid, right before the send; `releaseReminder` on a failed
+  send. A link Razorpay reports as paid is settled instead of reminded.
+  Legacy rows are never reminded. **Name + arrears (2026-09-29)**: every
+  reminder (and every quote/invoice message, everywhere) greets the client
+  by `client_pricing.client_name` when set, else "Hi Team"; a reminder also
+  gets an arrears line when `monthsPendingSince(pendingSince, cycleMonths,
+  today)` is 2 or more, where `pendingSince` is
+  `client_pricing.pending_since_override` if the admin set one, else the
+  cycle's own `service_period_start` — since `billing_period` is unique per
+  `(hubspot_deal_id, period start)` and HubSpot's Next Renewal Date only
+  advances on payment, a deal has at most one open unpaid cycle row at a
+  time, so that row's start date is itself the auto arrears basis (nothing
+  else tracks how far behind a client is).
 - **Admin** (`/admin/pricing`): Billing column shows Monthly / Quarterly /
   Half-yearly / Every N months / Not billed with the next quote date ("Next
   quote on …, automatic at 11:00 IST"), the last-paid amount for terms, and

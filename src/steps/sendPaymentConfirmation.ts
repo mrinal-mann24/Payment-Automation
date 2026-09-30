@@ -8,6 +8,7 @@ import {
   markPaymentConfirmedSent,
   markPaymentConfirmedSkipped,
 } from "../repositories/renewalJobs.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 
 export interface SendPaymentConfirmationResult {
@@ -46,8 +47,9 @@ export async function sendPaymentConfirmation(
     return { sent: false, skipReason: target.skipReason };
   }
 
+  const pricing = await findClientPricing(supabase, dealId);
   const pdf = await getInvoicePdf(job.zoho_invoice_id);
-  const message = asWhatsapp(invoiceMessage(job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null));
+  const message = asWhatsapp(invoiceMessage(job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null, pricing?.client_name || null));
 
   await sendDocumentMessage(target.recipient, message, {
     base64: pdf.toString("base64"),

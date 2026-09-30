@@ -7,6 +7,7 @@ import {
   findAdditionChargeByEstimateNumber,
   markAdditionPaymentConfirmedSent,
 } from "../repositories/additionCharges.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 
 export interface SendAdditionPaymentConfirmationResult {
@@ -45,8 +46,9 @@ export async function sendAdditionPaymentConfirmation(
     return { sent: false, skipReason: target.skipReason };
   }
 
+  const pricing = await findClientPricing(supabase, charge.hubspot_deal_id);
   const pdf = await getInvoicePdf(charge.zoho_invoice_id);
-  const message = asWhatsapp(invoiceMessage(oneTimeSubject(charge.description, charge.narration)));
+  const message = asWhatsapp(invoiceMessage(oneTimeSubject(charge.description, charge.narration), pricing?.client_name || null));
 
   await sendDocumentMessage(target.recipient, message, {
     base64: pdf.toString("base64"),

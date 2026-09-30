@@ -1,6 +1,6 @@
 # Progress tracker
 
-Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email delivery, one settlement path for Razorpay / Yes Bank / manual payments, 5th/7th/9th reminders, admin billing-cycle view — `context/features/step6.md`)
+Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client arrears tracking with an admin override, per-client name on every message — `context/features/step6.md`)
 
 ## How to use this file
 - Claude Code updates this after every change — don't let it go stale.
@@ -16,7 +16,7 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
 | 2 — Razorpay payment link | `context/features/step2.md` | Done | Fully verified end-to-end against real data: real test deal → real Zoho estimate (`QT-000416`) → real live-mode Razorpay payment link (`plink_TG6rOiKpZwe2xM`). Idempotency confirmed live (identical re-run reused both). |
 | 3 — Send quote + payment link via Periskope | `context/features/step3.md` | Done | Fully verified live end-to-end against the real test deal: real Zoho estimate PDF download → real Periskope WhatsApp send (confirmed `delivered` + received) → `renewal_jobs` marked done. No HubSpot write (see notes below — there's no real "Quote Sent" stage). Idempotent re-run confirmed. |
 | 4 — Razorpay webhook → Zoho invoice → WhatsApp confirmation | `context/features/step4.md` | Done | Live-verified end-to-end 2026-07-22: real Razorpay test-mode payment → signature-verified webhook → real Zoho invoice created (`INV-10589`) and read back correctly → Periskope WhatsApp message **with invoice PDF attached** → HubSpot deal moved to "Renewal Done". `renewal_jobs` row confirmed clean (`invoice_step_status: done`, `periskope_payment_confirmed_sent: true`, `hubspot_renewal_done: true`, `error_log: null`). |
-| 5 — Overdue payment reminders (WhatsApp) | `context/features/step5.md` → superseded by `step6.md` | Done (re-enabled) | Rewritten 2026-09-22 to the 5th/7th/9th IST schedule for monthly cycles (atomic claim before send, paid cycles never reminded, Razorpay lost-webhook guard) and re-enabled in `src/index.ts`. Nothing can fire before the first `YYYY-MM` cycle exists (October 2026). Message copy is still the placeholder. |
+| 5 — Overdue payment reminders (WhatsApp) | `context/features/step5.md` → superseded by `step6.md` | Done (re-enabled) | Rewritten 2026-09-29 to the 5th/9th/12th IST schedule (Sunday shift, atomic claim before send, paid cycles never reminded, Razorpay lost-webhook guard), business-confirmed message wording, per-client name and an arrears line for 2+ months pending, re-enabled in `src/index.ts`. Nothing can fire before the first `YYYY-MM` cycle exists (October 2026). |
 | 6 — GST + TDS on renewal estimates | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Live-verified: correct GST18 + TDS 10% math on two real estimates via the full webhook pipeline. |
 | 7 — Supabase `client_pricing` renewal-price override | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Renewal pipeline reads the override, live-verified; all 27 real VA-pipeline deals seeded from HubSpot. Editable via the admin interface (step 8). `addition_price` column was added, found unused after the addition-charges revision (step 9), and **dropped** same day (`0008_drop_client_pricing_addition_price.sql`). |
 | 8 — Pricing admin interface (`/admin/pricing`) | n/a (no separate feature spec) | Done | See 2026-07-31 changelog. Lists VA-pipeline deals, editable base price (saves to `client_pricing`), and an addition amount+description+Send control per deal. **No auth** — known, deferred gap. |
@@ -75,9 +75,15 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   on, Zoho will chase customers we have marked paid.
 - The reference invoice image mentioned in the 2026-09-21 brief never
   arrived; the quote/invoice layout has not been compared against it.
-- Step 5's three WhatsApp reminder message texts are placeholder copy,
-  not yet confirmed by the business (see
-  `src/steps/sendOverdueReminder.ts::reminderMessage`).
+- ~~Step 5's three WhatsApp reminder message texts are placeholder copy,
+  not yet confirmed by the business~~ — **resolved 2026-09-28/29**: the
+  business's own verbatim wording is now used for the quote, invoice and
+  both reminder stages (`src/utils/messages.ts`).
+- **New 2026-09-29**: the arrears-line wording and its 2-month threshold
+  (`ARREARS_THRESHOLD_MONTHS` in `sendOverdueReminder.ts`) are proposed,
+  not given verbatim by the business — confirm before relying on them.
+  Also unconfirmed: whether the arrears line should ever appear on quotes
+  or invoices (currently reminders only).
 - Whether step 5's T+7 "services discontinued" notice needs an actual
   system action (e.g. HubSpot dealstage change) or stays message-only —
   currently message-only.
@@ -126,6 +132,57 @@ Last updated: 2026-09-22 (monthly billing cycles, WhatsApp-group + email deliver
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-30 (line name back to "Virtual Accounting", editable WhatsApp
+  group) — (1) Every cycle quote's Zoho line is named **"Virtual
+  Accounting"** again, for every deal, reversing yesterday's change to the
+  HubSpot line item's name (business decision); the narration is unchanged
+  (HubSpot Description, else the service-period text). The legacy yearly
+  path still bills the HubSpot item as before. (2) The admin Clients table
+  ends with an editable **WhatsApp group** column: `clients.whatsapp_group_id`
+  per deal (`GET /admin/pricing/deals` → `whatsappGroupId`), saved by
+  `POST /admin/pricing/whatsapp-group` (18 digits or `…@g.us`, blank clears;
+  `setWhatsappGroupId` updates an existing `clients` row in place and only
+  creates one, with `client_name` = the deal name, when the deal has none).
+  Delivery is unchanged: group when set, contact phone otherwise. 263/263;
+  live: 24 of 26 deals show a group, save/clear round-trip on the test deal.
+- 2026-09-29 (5/9/12 reminders, arrears tracking, per-client name) — Three
+  changes requested together after reviewing a chronically-unpaid client
+  (Nirved Medicals): (1) the reminder schedule changed from 5th/7th/9th to
+  **5th/9th/12th**, sharing byte-identical wording between stage 2 and 3,
+  with each due date shifted to the following Monday when it lands on a
+  Sunday (`dueDateForStage`, `isSunday`, `addDays` — new in
+  `billingCycle.ts`; `reminderStageForJob` redesigned to compute a real
+  calendar date per stage instead of a bare day-of-cycle integer, which
+  structurally couldn't be weekday-aware); (2) an **arrears line** is
+  added to a reminder when the client is 2+ months behind
+  (`monthsPendingSince`, walking `nextRenewalDateAfter` forward), counted
+  from the deal's one open unpaid cycle (there is at most one per deal —
+  HubSpot's Next Renewal Date only advances on payment) unless the admin
+  has set `client_pricing.pending_since_override`; (3) every message
+  (quote, invoice, reminder, one-time quote — 8 call sites across 7
+  `src/steps/*.ts` files) now greets the client by
+  `client_pricing.client_name` ("Hi `<Name>`") when the admin has set one,
+  always blank until typed — never auto-filled from HubSpot — else "Hi
+  Team" unchanged. New migration `0014_client_pricing_name_and_pending_since.sql`
+  (applied live: `client_name`, `pending_since_override`, both nullable).
+  New admin routes `POST /admin/pricing/client-name` and
+  `POST /admin/pricing/pending-since` (empty string resets the override to
+  auto); `GET /admin/pricing/deals` now returns `clientName` and a
+  `pendingSince: { auto, override, effective, monthsPending }` object per
+  deal. New "Name" and "Pending since" admin-page columns (text input +
+  Save; date input + Save + "Reset to auto"), mirroring the existing
+  Accountant-emails cell pattern. TDD throughout (RED confirmed before
+  each production change); 265/265, typecheck clean. Live-verified against
+  the real Nirved Medicals_VA deal: it currently has **no** `renewal_jobs`
+  row at all (Next Renewal Date stuck at 1 Jul 2026, `daysOverdue: 90`,
+  never quoted), so the auto pending-since is `null` until it's quoted —
+  confirmed the override still works and computes `monthsPending: 3` for a
+  test date, then reset back to auto and the client-name save/clear both
+  round-tripped correctly; all test writes reverted to their original
+  `null` state afterward. **Open**: the arrears-line wording and the
+  2-month threshold are proposed, not given verbatim by the business, and
+  whether it should ever appear on quotes/invoices (not just reminders) is
+  unconfirmed — see `context/features/step6.md` §4.
 - 2026-09-29 (quote line name from HubSpot, "(Copy)" stripped) — The
   Zoho quote's line NAME is now the priced HubSpot line item's own Name
   (e.g. "All VA Services") instead of a hardcoded "Virtual Accounting"

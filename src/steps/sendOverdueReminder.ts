@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { asWhatsapp, reminderMessage } from "../utils/messages.js";
+import { asWhatsapp, monthYearLabel, reminderMessage } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { sendTextMessage } from "../clients/periskope.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import {
   claimReminder,
   findRenewalJob,
@@ -9,6 +10,7 @@ import {
   releaseReminder,
   type ReminderStage,
 } from "../repositories/renewalJobs.js";
+import { monthsPendingSince } from "../utils/billingCycle.js";
 import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 
 export interface SendOverdueReminderResult {
@@ -16,11 +18,16 @@ export interface SendOverdueReminderResult {
   skipReason: string | null;
 }
 
+// Below this many months pending, the reminder is just "your payment is
+// due" — not yet arrears worth calling out as its own line.
+const ARREARS_THRESHOLD_MONTHS = 2;
+
 export async function sendOverdueReminder(
   supabase: SupabaseClient,
   dealId: string,
   billingPeriod: string,
   stage: ReminderStage,
+  today: string,
 ): Promise<SendOverdueReminderResult> {
   const job = await findRenewalJob(supabase, dealId, billingPeriod);
 
@@ -62,8 +69,19 @@ export async function sendOverdueReminder(
     return { sent: false, skipReason: null };
   }
 
+  const pricing = await findClientPricing(supabase, dealId);
+  const name = pricing?.client_name || null;
+  // The one open unpaid cycle for this deal (this job itself) is the
+  // arrears basis unless the admin has set an override.
+  const pendingSince = pricing?.pending_since_override ?? job.service_period_start;
+  const monthsPending = pendingSince ? monthsPendingSince(pendingSince, job.term_months ?? 1, today) : 0;
+  const arrearsLine =
+    monthsPending >= ARREARS_THRESHOLD_MONTHS
+      ? `You currently have pending payments for the last ${monthsPending} months (since ${monthYearLabel(pendingSince!)}).`
+      : null;
+
   try {
-    await sendTextMessage(target.recipient, asWhatsapp(reminderMessage(stage, job.razorpay_short_url)));
+    await sendTextMessage(target.recipient, asWhatsapp(reminderMessage(stage, job.razorpay_short_url, name, arrearsLine)));
   } catch (err) {
     await releaseReminder(supabase, job.id, stage);
     throw err;

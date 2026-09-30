@@ -169,12 +169,15 @@ export const pricingAdminHtml = `<!doctype html>
         <thead>
           <tr>
             <th style="min-width:200px">Deal</th>
+            <th style="width:160px">Name</th>
             <th style="width:130px">Stage</th>
             <th style="min-width:250px">Billing</th>
+            <th style="width:200px">Pending since</th>
             <th style="width:150px">Auto quote</th>
             <th style="width:300px">Accountant emails</th>
             <th style="width:230px">Base price / month (fallback)</th>
             <th style="min-width:460px">One-time quote</th>
+            <th style="width:280px">WhatsApp group</th>
           </tr>
         </thead>
         <tbody id="deals-body"></tbody>
@@ -470,6 +473,115 @@ function emailCell(deal) {
   return td;
 }
 
+// The name used to greet the client ("Hi <Name>") in place of "Hi Team" —
+// blank until the admin types it, never auto-filled from HubSpot.
+function nameCell(deal) {
+  const td = document.createElement('td');
+  const row = el('div', 'field-row');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = deal.clientName ?? '';
+  input.placeholder = 'Hi Team (not set)';
+  const saveBtn = el('button', 'btn secondary small', 'Save');
+  saveBtn.type = 'button';
+  saveBtn.onclick = async () => {
+    const name = input.value.trim();
+    const done = busy(saveBtn, 'Saving');
+    try {
+      await postJson('/admin/pricing/client-name', { dealId: deal.dealId, name, dealName: deal.dealName });
+      toast('ok', deal.dealName + ': ' + (name ? 'messages will greet "Hi ' + name + '"' : 'name cleared — messages say "Hi Team"'));
+      await loadDeals();
+    } catch (err) {
+      toast('err', deal.dealName + ': ' + err.message, true);
+      done();
+    }
+  };
+  row.appendChild(input);
+  row.appendChild(saveBtn);
+  td.appendChild(row);
+  td.appendChild(el('div', 'sub', deal.clientName ? 'Messages say "Hi ' + deal.clientName + '"' : 'Messages say "Hi Team"'));
+  return td;
+}
+
+// The date arrears are counted from: auto-computed from the deal's one
+// open unpaid cycle, with an admin-editable override and a reset back to auto.
+function pendingSinceCell(deal, today) {
+  const td = document.createElement('td');
+  const p = deal.pendingSince;
+  const row = el('div', 'field-row');
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.max = today;
+  if (p.effective) input.value = p.effective;
+  const saveBtn = el('button', 'btn secondary small', 'Save');
+  saveBtn.type = 'button';
+  saveBtn.onclick = async () => {
+    const pendingSince = input.value;
+    const done = busy(saveBtn, 'Saving');
+    try {
+      await postJson('/admin/pricing/pending-since', { dealId: deal.dealId, pendingSince, dealName: deal.dealName });
+      toast('ok', deal.dealName + ': pending-since date saved');
+      await loadDeals();
+    } catch (err) {
+      toast('err', deal.dealName + ': ' + err.message, true);
+      done();
+    }
+  };
+  row.appendChild(input);
+  row.appendChild(saveBtn);
+  td.appendChild(row);
+  if (p.override) {
+    const resetBtn = el('button', 'btn secondary small', 'Reset to auto');
+    resetBtn.type = 'button';
+    resetBtn.onclick = async () => {
+      const done = busy(resetBtn, 'Resetting');
+      try {
+        await postJson('/admin/pricing/pending-since', { dealId: deal.dealId, pendingSince: '', dealName: deal.dealName });
+        toast('ok', deal.dealName + ': reset to the auto-computed pending-since date');
+        await loadDeals();
+      } catch (err) {
+        toast('err', deal.dealName + ': ' + err.message, true);
+        done();
+      }
+    };
+    td.appendChild(resetBtn);
+  }
+  if (p.auto) td.appendChild(el('div', 'sub', 'Auto (open cycle): ' + fmtDate(p.auto)));
+  td.appendChild(el('div', 'sub', p.monthsPending !== null ? p.monthsPending + (p.monthsPending === 1 ? ' month pending' : ' months pending') : 'Nothing pending'));
+  return td;
+}
+
+// The client's WhatsApp group id (clients table). Quotes, invoices and
+// reminders go to the group; with none set they go to the contact's phone.
+function whatsappGroupCell(deal) {
+  const td = document.createElement('td');
+  const row = el('div', 'field-row');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'mono';
+  input.value = deal.whatsappGroupId ?? '';
+  input.placeholder = '18-digit group id';
+  const saveBtn = el('button', 'btn secondary small', 'Save');
+  saveBtn.type = 'button';
+  saveBtn.onclick = async () => {
+    const groupId = input.value.trim();
+    const done = busy(saveBtn, 'Saving');
+    try {
+      await postJson('/admin/pricing/whatsapp-group', { dealId: deal.dealId, groupId, dealName: deal.dealName });
+      toast('ok', deal.dealName + ': ' + (groupId ? 'WhatsApp group saved — messages go to the group' : 'WhatsApp group cleared — messages go to the contact\\'s phone'));
+      await loadDeals();
+    } catch (err) {
+      toast('err', deal.dealName + ': ' + err.message, true);
+      done();
+    }
+  };
+  row.appendChild(input);
+  row.appendChild(saveBtn);
+  td.appendChild(row);
+  td.appendChild(el('div', 'sub' + (deal.whatsappGroupId ? '' : ' warn'), deal.whatsappGroupId ? 'Messages go to this group' : 'No group — messages go to the HubSpot contact\\'s phone'));
+  return td;
+}
+
 function renderDeals(data) {
   const tbody = document.getElementById('deals-body');
   tbody.innerHTML = '';
@@ -484,8 +596,10 @@ function renderDeals(data) {
     nameTd.appendChild(el('div', 'sub mono', deal.dealId));
     tr.appendChild(nameTd);
 
+    tr.appendChild(nameCell(deal));
     tr.appendChild(el('td', null, stageName(deal.dealStage)));
     tr.appendChild(billingCell(deal));
+    tr.appendChild(pendingSinceCell(deal, data.cycle.today));
     tr.appendChild(autoQuoteCell(deal));
     tr.appendChild(emailCell(deal));
 
@@ -560,6 +674,8 @@ function renderDeals(data) {
     form.appendChild(sendBtn);
     additionTd.appendChild(form);
     tr.appendChild(additionTd);
+
+    tr.appendChild(whatsappGroupCell(deal));
 
     tbody.appendChild(tr);
   }

@@ -8,6 +8,7 @@ import {
   markPeriskopeSent,
   markPeriskopeSkipped,
 } from "../repositories/renewalJobs.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 
 export interface SendRenewalMessageResult {
@@ -49,8 +50,9 @@ export async function sendRenewalMessage(
     return { sent: false, skipReason: target.skipReason };
   }
 
+  const pricing = await findClientPricing(supabase, dealId);
   const pdf = await getEstimatePdf(job.zoho_estimate_id);
-  const message = asWhatsapp(quoteMessage(job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null, job.razorpay_short_url));
+  const message = asWhatsapp(quoteMessage(job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null, job.razorpay_short_url, pricing?.client_name || null));
 
   await sendDocumentMessage(target.recipient, message, {
     base64: pdf.toString("base64"),

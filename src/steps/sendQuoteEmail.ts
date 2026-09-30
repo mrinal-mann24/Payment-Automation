@@ -3,6 +3,7 @@ import { asEmailHtml, periodLabel, quoteMessage } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { emailEstimate } from "../clients/zoho.js";
 import { findRenewalJob, markEmailError, markEstimateEmailSent } from "../repositories/renewalJobs.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 
 export interface SendEmailResult {
   sent: boolean;
@@ -45,11 +46,12 @@ export async function sendQuoteEmail(
       return { sent: false, error: "no Accountant Email on the HubSpot deal" };
     }
     const period = job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null;
+    const pricing = await findClientPricing(supabase, dealId);
 
     await emailEstimate(job.zoho_estimate_id, {
       to: deal.billingEmails,
       subject: `Virtual Accounting quote ${job.zoho_estimate_number}`,
-      body: asEmailHtml(quoteMessage(period, job.razorpay_short_url)),
+      body: asEmailHtml(quoteMessage(period, job.razorpay_short_url, pricing?.client_name || null)),
     });
 
     await markEstimateEmailSent(supabase, job.id);

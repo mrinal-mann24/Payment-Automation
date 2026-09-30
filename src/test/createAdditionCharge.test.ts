@@ -21,12 +21,16 @@ vi.mock("../repositories/additionCharges.js", () => ({
   markAdditionEstimateEmailSent: vi.fn(),
   markAdditionEmailError: vi.fn(),
 }));
+vi.mock("../repositories/clientPricing.js", () => ({
+  findClientPricing: vi.fn(),
+}));
 
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { createEstimate, emailEstimate, findOrCreateCustomer, getEstimatePdf } from "../clients/zoho.js";
 import { createPaymentLink } from "../clients/razorpay.js";
 import { isValidWhatsappRecipient, sendDocumentMessage } from "../clients/periskope.js";
 import { findWhatsappGroupId } from "../repositories/clients.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import {
   createAdditionChargeRow,
   findRecentDuplicateAdditionCharge,
@@ -96,6 +100,7 @@ beforeEach(() => {
   vi.mocked(getEstimatePdf).mockResolvedValue(Buffer.from("pdf"));
   vi.mocked(findWhatsappGroupId).mockResolvedValue("120363423447165818");
   vi.mocked(isValidWhatsappRecipient).mockReturnValue(true);
+  vi.mocked(findClientPricing).mockResolvedValue(null);
 });
 
 describe("createAdditionCharge (one-time quote)", () => {
@@ -224,6 +229,27 @@ describe("createAdditionCharge — no accountant email", () => {
     expect(emailEstimate).not.toHaveBeenCalled();
     expect(markAdditionEmailError).toHaveBeenCalledWith(fakeSupabase, row.id, "quote email: no Accountant Email on the HubSpot deal");
     expect(result).toMatchObject({ periskopeSent: true, emailSent: false, emailError: "no Accountant Email on the HubSpot deal" });
+  });
+});
+
+describe("createAdditionCharge — client name", () => {
+  it("greets the client by name, on both WhatsApp and email, when client_pricing.client_name is set", async () => {
+    vi.mocked(findClientPricing).mockResolvedValue({
+      id: "p-1",
+      hubspot_deal_id: "deal-1",
+      deal_name: null,
+      base_price: null,
+      auto_quote: true,
+      client_name: "Rajesh",
+      pending_since_override: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    await createAdditionCharge(fakeSupabase, "deal-1", 2500, "Site visit", null);
+
+    expect(sendDocumentMessage).toHaveBeenCalledWith("120363423447165818", expect.stringContaining("Hi Rajesh,"), expect.anything());
+    expect(vi.mocked(emailEstimate).mock.calls[0]![1].body).toContain("Hi Rajesh,");
   });
 });
 

@@ -14,6 +14,7 @@ import {
   markAdditionPeriskopeSent,
   markAdditionPeriskopeSkipped,
 } from "../repositories/additionCharges.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { resolveWhatsappRecipient } from "./whatsappRecipient.js";
 
 export interface CreateAdditionChargeResult {
@@ -44,6 +45,8 @@ export async function createAdditionCharge(
   narration: string | null,
 ): Promise<CreateAdditionChargeResult> {
   const deal = await fetchDealWithLineItemsAndContact(dealId);
+  const pricing = await findClientPricing(supabase, dealId);
+  const clientName = pricing?.client_name || null;
 
   const duplicate = await findRecentDuplicateAdditionCharge(supabase, dealId, amount, service);
   if (duplicate) {
@@ -101,7 +104,7 @@ export async function createAdditionCharge(
       const pdf = await getEstimatePdf(estimateId);
       await sendDocumentMessage(
         target.recipient,
-        asWhatsapp(quoteMessage(oneTimeSubject(service, narration), shortUrl)),
+        asWhatsapp(quoteMessage(oneTimeSubject(service, narration), shortUrl, clientName)),
         { base64: pdf.toString("base64"), filename: `${estimateNumber}.pdf`, mimetype: "application/pdf" },
       );
       periskopeSent = true;
@@ -126,7 +129,7 @@ export async function createAdditionCharge(
     await emailEstimate(estimateId, {
       to: deal.billingEmails,
       subject: `Quote ${estimateNumber} — ${service}`,
-      body: asEmailHtml(quoteMessage(oneTimeSubject(service, narration), shortUrl)),
+      body: asEmailHtml(quoteMessage(oneTimeSubject(service, narration), shortUrl, clientName)),
     });
     await markAdditionEstimateEmailSent(supabase, row.id);
     emailSent = true;

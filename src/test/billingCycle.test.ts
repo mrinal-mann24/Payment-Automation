@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  addDays,
   billingCycleFrom,
   billingMonthKey,
   daysBetween,
+  isSunday,
   istToday,
+  monthsPendingSince,
   nextRenewalDateAfter,
   servicePeriodFrom,
   toIsoDate,
@@ -95,5 +98,38 @@ describe("unixSecondsToIstDate", () => {
   it("converts Razorpay's created_at (epoch seconds) to the IST calendar date", () => {
     expect(unixSecondsToIstDate(1790793000)).toBe("2026-10-01"); // 2026-09-30T18:30:00Z
     expect(unixSecondsToIstDate(1790792999)).toBe("2026-09-30");
+  });
+});
+
+describe("addDays", () => {
+  it("adds (or subtracts) whole days, rolling over month and year boundaries", () => {
+    expect(addDays("2026-09-30", 4)).toBe("2026-10-04");
+    expect(addDays("2026-12-28", 5)).toBe("2027-01-02");
+    expect(addDays("2026-10-05", 0)).toBe("2026-10-05");
+    expect(addDays("2026-10-05", -3)).toBe("2026-10-02");
+  });
+});
+
+describe("isSunday", () => {
+  it("is true only for a real Sunday, checked purely from the calendar date", () => {
+    expect(isSunday("2026-10-04")).toBe(true); // known Sunday
+    expect(isSunday("2026-10-11")).toBe(true); // known Sunday
+    expect(isSunday("2026-10-03")).toBe(false); // Saturday
+    expect(isSunday("2026-10-05")).toBe(false); // Monday
+  });
+});
+
+describe("monthsPendingSince", () => {
+  it("counts full cycles elapsed since the pending-since date, using exact cycle-boundary arithmetic", () => {
+    // A monthly client pending since 1 July, today 1 October: 3 full months (Jul, Aug, Sep) elapsed.
+    expect(monthsPendingSince("2026-07-01", 1, "2026-10-01")).toBe(3);
+    // A quarterly client pending since 1 January, today 1 October: 3 full quarters = 9 months.
+    expect(monthsPendingSince("2026-01-01", 3, "2026-10-01")).toBe(9);
+  });
+
+  it("is 0 when pending-since is today or in the future, and 0 before the first cycle has elapsed", () => {
+    expect(monthsPendingSince("2026-10-01", 1, "2026-10-01")).toBe(0);
+    expect(monthsPendingSince("2026-10-01", 1, "2026-10-15")).toBe(0);
+    expect(monthsPendingSince("2026-11-01", 1, "2026-10-01")).toBe(0);
   });
 });

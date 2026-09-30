@@ -9,6 +9,7 @@ import {
   updateDealAccountantEmails,
   type DealEmails,
 } from "../clients/hubspot.js";
+import { isValidWhatsappGroupId } from "../clients/periskope.js";
 import { fetchPaymentLink } from "../clients/razorpay.js";
 import {
   findAdditionChargeById,
@@ -16,7 +17,8 @@ import {
   listRecentAdditionCharges,
   type AdditionCharge,
 } from "../repositories/additionCharges.js";
-import { setAutoQuote, upsertClientPricing } from "../repositories/clientPricing.js";
+import { setAutoQuote, setClientName, setPendingSinceOverride, upsertClientPricing } from "../repositories/clientPricing.js";
+import { setWhatsappGroupId } from "../repositories/clients.js";
 import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
 import { createAdditionCharge } from "../steps/createAdditionCharge.js";
 import { settleAdditionPayment } from "../steps/settleAdditionPayment.js";
@@ -26,7 +28,7 @@ import {
   settleRenewalPayment,
   type PaymentInput,
 } from "../steps/settleRenewalPayment.js";
-import { billingMonthKey, daysBetween, istToday, servicePeriodFrom, unixSecondsToIstDate } from "../utils/billingCycle.js";
+import { billingMonthKey, daysBetween, istToday, monthsPendingSince, servicePeriodFrom, unixSecondsToIstDate } from "../utils/billingCycle.js";
 import { deriveCycleStatus } from "../utils/cycleStatus.js";
 import { classifyDeal, cycleLabel, latestRecurringLineItem, type DealClassification } from "../utils/monthlyEligibility.js";
 import { amountSchema, hubspotIdSchema, MAX_AMOUNT, paymentDateSchema } from "../utils/validation.js";
@@ -167,9 +169,10 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
     const supabase = getSupabaseClient();
     const monthKey = billingMonthKey();
     const today = istToday();
-    const [deals, pricing, jobs, recentAdditions, unsettledAdditions] = await Promise.all([
+    const [deals, pricing, clients, jobs, recentAdditions, unsettledAdditions] = await Promise.all([
       fetchVaDealsWithLineItems(),
       supabase.from("client_pricing").select("*"),
+      supabase.from("clients").select("hubspot_deal_id, whatsapp_group_id").not("hubspot_deal_id", "is", null),
       findAdminCycleJobs(supabase, monthKey),
       listRecentAdditionCharges(supabase),
       findPaidUnsettledAdditionCharges(supabase),
@@ -181,9 +184,16 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
       ...unsettledAdditions.filter((charge) => !recentAdditions.some((recent) => recent.id === charge.id)),
     ];
     if (pricing.error) throw new Error(pricing.error.message);
+    if (clients.error) throw new Error(clients.error.message);
     const emails = await fetchVaDealEmails(deals.map((deal) => deal.dealId));
 
     const pricingByDealId = new Map(pricing.data?.map((r) => [r.hubspot_deal_id, r]) ?? []);
+    const groupIdByDealId = new Map<string, string | null>(
+      (clients.data as Array<{ hubspot_deal_id: string; whatsapp_group_id: string | null }>).map((r) => [
+        r.hubspot_deal_id,
+        r.whatsapp_group_id?.trim() || null,
+      ]),
+    );
     const jobsByDealId = new Map<string, RenewalJob[]>();
     for (const job of jobs) {
       jobsByDealId.set(job.hubspot_deal_id, [...(jobsByDealId.get(job.hubspot_deal_id) ?? []), job]);
@@ -197,6 +207,16 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
       // recurring line item with the latest billing start date.
       const priced = latestRecurringLineItem(deal.lineItems);
       const hubspotPrice = priced && priced.price > 0 ? priced.price * priced.quantity : null;
+      // The one open unpaid cycle (at most one per deal, see ARCHITECTURE.md
+      // §4) is the auto default for "pending since"; the admin can override it.
+      const openUnpaidJob = dealJobs.find(
+        (job) => job.service_period_start !== null && job.razorpay_step_status === "done" && job.paid_at === null,
+      );
+      const autoPendingSince = openUnpaidJob?.service_period_start ?? null;
+      const effectivePendingSince = pricing?.pending_since_override ?? autoPendingSince;
+      const monthsPending = effectivePendingSince
+        ? monthsPendingSince(effectivePendingSince, openUnpaidJob?.term_months ?? 1, today)
+        : null;
       return {
         dealId: deal.dealId,
         dealName: deal.dealName,
@@ -204,6 +224,14 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
         basePrice: pricing?.base_price ?? null,
         hubspotPrice,
         autoQuote: !paused,
+        clientName: pricing?.client_name ?? null,
+        whatsappGroupId: groupIdByDealId.get(deal.dealId) ?? null,
+        pendingSince: {
+          auto: autoPendingSince,
+          override: pricing?.pending_since_override ?? null,
+          effective: effectivePendingSince,
+          monthsPending,
+        },
         billing: billingView(classifyDeal(deal, today), today, dealJobs, paused),
         email: emailView(emails.get(deal.dealId)),
         cycles: dealJobs.map(cycleView),
@@ -267,6 +295,87 @@ pricingAdminRouter.post("/admin/pricing/auto-quote", async (req: Request, res: R
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: "Failed to save the auto-quote setting", details: message });
+  }
+});
+
+// The client's name, used to greet them ("Hi <Name>") in place of "Hi
+// Team" on every message sent for this deal. Blank until the admin types
+// it — never auto-filled from HubSpot.
+const clientNameSchema = z.object({
+  dealId: hubspotIdSchema,
+  name: z.string().trim().max(200),
+  dealName: z.string().optional(),
+});
+
+pricingAdminRouter.post("/admin/pricing/client-name", async (req: Request, res: Response) => {
+  const parsed = clientNameSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    await setClientName(getSupabaseClient(), parsed.data.dealId, parsed.data.name || null, parsed.data.dealName);
+    res.status(200).json({ ok: true, name: parsed.data.name || null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to save the client name", details: message });
+  }
+});
+
+// The date arrears are counted from. The auto default is the deal's one
+// open unpaid cycle's service_period_start; the admin can override it, and
+// an empty string resets to that auto default.
+const pendingSinceSchema = z.object({
+  dealId: hubspotIdSchema,
+  pendingSince: z.union([z.literal(""), paymentDateSchema]),
+  dealName: z.string().optional(),
+});
+
+pricingAdminRouter.post("/admin/pricing/pending-since", async (req: Request, res: Response) => {
+  const parsed = pendingSinceSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    await setPendingSinceOverride(getSupabaseClient(), parsed.data.dealId, parsed.data.pendingSince || null, parsed.data.dealName);
+    res.status(200).json({ ok: true, pendingSince: parsed.data.pendingSince || null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to save the pending-since date", details: message });
+  }
+});
+
+// The client's WhatsApp group (clients.whatsapp_group_id): where the quote,
+// invoice and reminders go, with the contact's phone as the fallback when
+// it is blank. Blank clears it.
+const whatsappGroupSchema = z.object({
+  dealId: hubspotIdSchema,
+  groupId: z.string().trim().max(64),
+  dealName: z.string().trim().min(1).max(300),
+});
+
+pricingAdminRouter.post("/admin/pricing/whatsapp-group", async (req: Request, res: Response) => {
+  const parsed = whatsappGroupSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return;
+  }
+  const groupId = parsed.data.groupId || null;
+  if (groupId && !isValidWhatsappGroupId(groupId)) {
+    res.status(400).json({ error: "Not a WhatsApp group id: expected 18 digits, or an id ending in @g.us" });
+    return;
+  }
+
+  try {
+    await setWhatsappGroupId(getSupabaseClient(), parsed.data.dealId, groupId, parsed.data.dealName);
+    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> WhatsApp group ${groupId ? "set" : "cleared"}`);
+    res.status(200).json({ ok: true, groupId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to save the WhatsApp group id", details: message });
   }
 });
 

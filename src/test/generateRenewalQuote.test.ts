@@ -84,6 +84,8 @@ describe("generateRenewalQuote (POST /webhooks/renewal)", () => {
       deal_name: null,
       base_price: 5000,
       auto_quote: false,
+      client_name: null,
+      pending_since_override: null,
       created_at: "2026-09-23T00:00:00Z",
       updated_at: "2026-09-23T00:00:00Z",
     });

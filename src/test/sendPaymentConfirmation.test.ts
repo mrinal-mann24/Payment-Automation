@@ -21,8 +21,13 @@ vi.mock("../repositories/clients.js", () => ({
   findWhatsappGroupId: vi.fn(),
 }));
 
+vi.mock("../repositories/clientPricing.js", () => ({
+  findClientPricing: vi.fn(),
+}));
+
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { findWhatsappGroupId } from "../repositories/clients.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import { getInvoicePdf } from "../clients/zoho.js";
 import { isValidWhatsappRecipient, sendDocumentMessage } from "../clients/periskope.js";
 import {
@@ -91,6 +96,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isValidWhatsappRecipient).mockReturnValue(true);
   vi.mocked(findWhatsappGroupId).mockResolvedValue(null);
+  vi.mocked(findClientPricing).mockResolvedValue(null);
 });
 
 describe("sendPaymentConfirmation", () => {
@@ -130,6 +136,27 @@ describe("sendPaymentConfirmation", () => {
       expect.objectContaining({ filename: "INV-000123.pdf", mimetype: "application/pdf" }),
     );
     expect(markPaymentConfirmedSent).toHaveBeenCalledWith(fakeSupabase, "job-1");
+  });
+
+  it("greets the client by name when client_pricing.client_name is set", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(getInvoicePdf).mockResolvedValue(Buffer.from("pdf-bytes"));
+    vi.mocked(findClientPricing).mockResolvedValue({
+      id: "p-1",
+      hubspot_deal_id: "deal-1",
+      deal_name: null,
+      base_price: null,
+      auto_quote: true,
+      client_name: "Rajesh",
+      pending_since_override: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    await sendPaymentConfirmation(fakeSupabase, "deal-1", "2026-07");
+
+    expect(sendDocumentMessage).toHaveBeenCalledWith("919876543210", expect.stringContaining("Hi Rajesh,"), expect.any(Object));
   });
 
   it("is idempotent: does not resend when periskope_payment_confirmed_sent is already true", async () => {

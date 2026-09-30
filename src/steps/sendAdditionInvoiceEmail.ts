@@ -7,6 +7,7 @@ import {
   markAdditionEmailError,
   markAdditionInvoiceEmailSent,
 } from "../repositories/additionCharges.js";
+import { findClientPricing } from "../repositories/clientPricing.js";
 import type { SendEmailResult } from "./sendQuoteEmail.js";
 
 // Best-effort, same contract as sendInvoiceEmail for renewals: failures
@@ -36,10 +37,12 @@ export async function sendAdditionInvoiceEmail(
       return { sent: false, error: "no Accountant Email on the HubSpot deal" };
     }
 
+    const pricing = await findClientPricing(supabase, charge.hubspot_deal_id);
+
     await emailInvoice(charge.zoho_invoice_id, {
       to: deal.billingEmails,
       subject: `Payment received — invoice ${charge.zoho_invoice_number}`,
-      body: asEmailHtml(invoiceMessage(oneTimeSubject(charge.description, charge.narration))),
+      body: asEmailHtml(invoiceMessage(oneTimeSubject(charge.description, charge.narration), pricing?.client_name || null)),
     });
 
     await markAdditionInvoiceEmailSent(supabase, charge.id);

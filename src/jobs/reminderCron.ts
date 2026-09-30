@@ -3,26 +3,38 @@ import { fetchPaymentLink } from "../clients/razorpay.js";
 import { findUnpaidCycleJobs, type ReminderStage, type RenewalJob } from "../repositories/renewalJobs.js";
 import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
 import { settleRenewalPayment } from "../steps/settleRenewalPayment.js";
-import { daysBetween, istToday } from "../utils/billingCycle.js";
+import { addDays, isSunday, istToday } from "../utils/billingCycle.js";
 
-// Reminders for an unpaid cycle go out on days 5, 7 and 9 of the cycle,
-// counted from the day it started: the 5th/7th/9th of the month for a
-// monthly cycle (quoted on the 1st), 4/6/8 days after the quote for a
-// quarterly or half-yearly one. Each stage keeps a one-day grace window so
-// a single missed tick is recovered the next day; a stage is never sent
-// twice (reminder_N_sent_at) and only one stage fires per run.
-export function reminderStageForDay(dayOfCycle: number): ReminderStage | null {
-  if (dayOfCycle === 5 || dayOfCycle === 6) return 1;
-  if (dayOfCycle === 7 || dayOfCycle === 8) return 2;
-  if (dayOfCycle === 9 || dayOfCycle === 10) return 3;
-  return null;
+// Reminders for an unpaid cycle go out on days 5, 9 and 12 of the cycle
+// (business decision, 2026-09-29 — replaces the earlier 5/7/9 schedule),
+// counted from the day it started. If a stage's calculated date is a
+// Sunday, it shifts to the Monday after instead of sending that day. Each
+// stage keeps a one-day grace window (computed from the possibly-shifted
+// date) so a single missed tick is recovered the next day; a stage is
+// never sent twice (reminder_N_sent_at) and only one stage fires per run.
+const STAGE_DAY_OF_CYCLE: Record<ReminderStage, number> = { 1: 5, 2: 9, 3: 12 };
+const GRACE_DAYS = 1;
+
+// The calendar date a stage is due: day N of the cycle = start + (N-1)
+// days, shifted one day forward when that lands on a Sunday. The 3-day
+// minimum gap between stages (9 -> 12) is bigger than the shift (1 day)
+// plus the grace window (1 day), so stage windows can never collide.
+export function dueDateForStage(cycleStart: string, stage: ReminderStage): string {
+  const raw = addDays(cycleStart, STAGE_DAY_OF_CYCLE[stage] - 1);
+  return isSunday(raw) ? addDays(raw, 1) : raw;
 }
 
 export function reminderStageForJob(job: RenewalJob, today: string): ReminderStage | null {
   if (!job.service_period_start) {
     return null; // legacy row: no cycle, no reminders
   }
-  return reminderStageForDay(daysBetween(job.service_period_start, today) + 1);
+  for (const stage of [1, 2, 3] as ReminderStage[]) {
+    const due = dueDateForStage(job.service_period_start, stage);
+    if (today >= due && today <= addDays(due, GRACE_DAYS)) {
+      return stage;
+    }
+  }
+  return null;
 }
 
 // Same one-number-sends-many pacing as the cycle generator.
@@ -77,7 +89,7 @@ export async function runOverdueReminderCheck(
         }
       }
 
-      const { sent, skipReason } = await sendOverdueReminder(supabase, job.hubspot_deal_id, job.billing_period, stage);
+      const { sent, skipReason } = await sendOverdueReminder(supabase, job.hubspot_deal_id, job.billing_period, stage, today);
       console.log(
         sent
           ? `[reminderCron] deal ${job.hubspot_deal_id} (${job.billing_period}) -> reminder ${stage} sent`

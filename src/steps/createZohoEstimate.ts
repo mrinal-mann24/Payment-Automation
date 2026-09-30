@@ -99,13 +99,11 @@ export async function createZohoEstimate(
           `No price on the HubSpot line item and no base price in client_pricing for deal ${dealId}; refusing to guess a price for cycle ${cycle.key}`,
         );
       }
-      // The quote's line is named after the HubSpot line item that priced
-      // it (decision 2026-09-29 — the accountant's own name, e.g. "All VA
-      // Services"), with a cloned item's accumulated "(Copy)" suffix
-      // stripped, falling back to "Virtual Accounting" only when there is
-      // no matching item to name it after.
-      const quoteLineName = (latest?.name && cleanLineItemName(latest.name)) || "Virtual Accounting";
-      dealForEstimate = { ...deal, lineItems: [{ id: "", name: quoteLineName, quantity: 1, price }] };
+      // Every cycle quote bills one line named "Virtual Accounting"
+      // (decision 2026-09-30, reversing the one-day experiment of using the
+      // HubSpot line item's own name); the narration still carries the
+      // client-specific text.
+      dealForEstimate = { ...deal, lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price }] };
     } else {
       if (latest && latest.price > 0) {
         dealForEstimate = { ...deal, lineItems: [{ ...latest, name: cleanLineItemName(latest.name) }] };

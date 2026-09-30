@@ -91,3 +91,39 @@ export function toIsoDate(value: string | null | undefined): string | null {
 export function unixSecondsToIstDate(seconds: number): string {
   return istToday(new Date(seconds * 1000));
 }
+
+// Adds (or subtracts, for a negative count) whole calendar days, rolling
+// over month/year boundaries via Date.UTC's own overflow — same technique
+// as periodEndExclusive.
+export function addDays(iso: string, days: number): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  return isoDate(new Date(Date.UTC(year!, month! - 1, day! + days)));
+}
+
+// Whether a calendar date is a Sunday. `iso` is already an IST calendar
+// date by the time anything calls this (the caller ran it through
+// istToday first), so no further offset is applied here — a calendar
+// date's weekday has no timezone component once the date itself is fixed.
+export function isSunday(iso: string): boolean {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(Date.UTC(year!, month! - 1, day!)).getUTCDay() === 0;
+}
+
+// How many full cycles of `cycleMonths` have elapsed since `pendingSince`,
+// counted the same way payment settlement itself advances a date
+// (nextRenewalDateAfter), not by dividing day-counts — so a quarterly
+// arrears client counts in exact 3-month jumps through real month-end
+// clamping, not an approximation. 0 when pendingSince is today or later.
+export function monthsPendingSince(pendingSince: string, cycleMonths: number, today: string): number {
+  let cursor = pendingSince;
+  let months = 0;
+  while (true) {
+    const next = nextRenewalDateAfter(cursor, cycleMonths);
+    if (next > today) {
+      break;
+    }
+    cursor = next;
+    months += cycleMonths;
+  }
+  return months;
+}
