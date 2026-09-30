@@ -89,18 +89,43 @@ const row = {
   updated_at: "2026-10-05T05:30:00Z",
 };
 
+const pricingRow = {
+  id: "p-1",
+  hubspot_deal_id: "deal-1",
+  deal_name: null,
+  base_price: null,
+  auto_quote: true,
+  client_name: null,
+  pending_since_override: null,
+  zoho_customer_id: "2273874000000777001",
+  zoho_customer_name: "Test RenewalAutomation",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue(deal);
   vi.mocked(findRecentDuplicateAdditionCharge).mockResolvedValue(null);
   vi.mocked(createAdditionChargeRow).mockResolvedValue(row);
-  vi.mocked(findOrCreateCustomer).mockResolvedValue("zcust-1");
   vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-ot", estimateNumber: "QT-OT", total: 2700 });
   vi.mocked(createPaymentLink).mockResolvedValue({ paymentLinkId: "plink-ot", shortUrl: "https://rzp.io/i/ot" });
   vi.mocked(getEstimatePdf).mockResolvedValue(Buffer.from("pdf"));
   vi.mocked(findWhatsappGroupId).mockResolvedValue("120363423447165818");
   vi.mocked(isValidWhatsappRecipient).mockReturnValue(true);
-  vi.mocked(findClientPricing).mockResolvedValue(null);
+  vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+});
+
+describe("createAdditionCharge — Zoho customer", () => {
+  it("refuses a one-time quote for a deal with no mapped Zoho customer, before any row is created", async () => {
+    vi.mocked(findClientPricing).mockResolvedValue({ ...pricingRow, zoho_customer_id: null, zoho_customer_name: null });
+
+    await expect(createAdditionCharge(fakeSupabase, "deal-1", 2500, "Site visit", null)).rejects.toThrow(/No Zoho customer mapped/);
+
+    expect(createAdditionChargeRow).not.toHaveBeenCalled();
+    expect(findOrCreateCustomer).not.toHaveBeenCalled();
+    expect(createEstimate).not.toHaveBeenCalled();
+  });
 });
 
 describe("createAdditionCharge (one-time quote)", () => {
@@ -109,7 +134,7 @@ describe("createAdditionCharge (one-time quote)", () => {
 
     expect(createAdditionChargeRow).toHaveBeenCalledWith(fakeSupabase, "deal-1", 2500, "Site visit", "Visit to the Pune office on 12 October");
     expect(createEstimate).toHaveBeenCalledWith(
-      "zcust-1",
+      "2273874000000777001",
       expect.objectContaining({ lineItems: [expect.objectContaining({ name: "Site visit", price: 2500, quantity: 1 })] }),
       { key: "one-time-0d2b6c1e", name: "Site visit", description: "Visit to the Pune office on 12 October" },
     );
@@ -209,12 +234,13 @@ describe("createAdditionCharge (one-time quote)", () => {
 });
 
 describe("createAdditionCharge — billing email", () => {
-  it("emails the one-time quote to the billing email, while the Zoho customer stays keyed by the contact identity", async () => {
+  it("emails the one-time quote to the billing email, while the quote is billed to the mapped Zoho customer", async () => {
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...deal, billingEmails: ["accounts@acme.example", "cfo@acme.example"] });
 
     await createAdditionCharge(fakeSupabase, "deal-1", 2500, "Site visit", null);
 
-    expect(findOrCreateCustomer).toHaveBeenCalledWith("client@example.com", "Client Name");
+    expect(findOrCreateCustomer).not.toHaveBeenCalled();
+    expect(createEstimate).toHaveBeenCalledWith("2273874000000777001", expect.anything(), expect.anything());
     expect(vi.mocked(emailEstimate).mock.calls[0]![1].to).toEqual(["accounts@acme.example", "cfo@acme.example"]);
   });
 });
@@ -242,6 +268,8 @@ describe("createAdditionCharge — client name", () => {
       auto_quote: true,
       client_name: "Rajesh",
       pending_since_override: null,
+      zoho_customer_id: "2273874000000777001",
+      zoho_customer_name: "Test RenewalAutomation",
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     });

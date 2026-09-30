@@ -132,6 +132,23 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-30 (Zoho customer mapping) — Quotes and invoices were landing
+  under a **new** Zoho customer every time: `findOrCreateCustomer` looked
+  customers up by the contact's email, but the org's 724 customers are
+  stored under the company name with no email (14 have one), so it never
+  matched and created a person-named duplicate. Now each deal is mapped to
+  its existing Zoho customer on the admin page — new **Zoho customer**
+  column (live name search via `GET /admin/pricing/zoho-customers?q=`,
+  pick → `POST /admin/pricing/zoho-customer`, Clear), stored in
+  `client_pricing.zoho_customer_id/_name` (migration `0015`, applied live),
+  `zoho.ts::searchCustomers/getCustomer`. `createZohoEstimate` and
+  `createAdditionCharge` bill that id and **refuse a deal with no mapping
+  before any row or Zoho record exists** (business decision); the page
+  shows a "No Zoho customer" tile and a per-deal warning. 272/272.
+  **ACTION before 1 Oct 11:00 IST: map all 13 clients due 1 October on the
+  admin page** (Laundry Labs exists twice in Zoho — pick one); unmapped
+  clients are not quoted. Previously auto-created duplicate Zoho contacts
+  need manual clean-up in Zoho (skip any with invoices).
 - 2026-09-30 (random gap between quotes) — `runBillingCycleCheck` now
   waits a random **1–3 minutes** between deals (`randomPauseMs`,
   `DEFAULT_PAUSE_RANGE_MS`, option `pauseRangeMs`) instead of a fixed 5 s,

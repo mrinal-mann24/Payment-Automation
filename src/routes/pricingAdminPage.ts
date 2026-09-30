@@ -170,6 +170,7 @@ export const pricingAdminHtml = `<!doctype html>
           <tr>
             <th style="min-width:200px">Deal</th>
             <th style="width:160px">Name</th>
+            <th style="width:320px">Zoho customer</th>
             <th style="width:130px">Stage</th>
             <th style="min-width:250px">Billing</th>
             <th style="width:200px">Pending since</th>
@@ -337,8 +338,9 @@ function settlementSummary(result) {
 
 function renderStats(data) {
   const deals = data.deals;
-  let monthly = 0, term = 0, attention = 0, quotingToday = 0, datePassed = 0, noEmail = 0;
+  let monthly = 0, term = 0, attention = 0, quotingToday = 0, datePassed = 0, noEmail = 0, noZoho = 0;
   for (const d of deals) {
+    if (!d.zohoCustomer) noZoho++;
     const b = d.billing;
     if (b.kind === 'cycle') {
       if (b.months === 1) monthly++; else term++;
@@ -361,6 +363,7 @@ function renderStats(data) {
     ['Paused', paused, paused ? 'warn' : 'good', 'automatic quotes switched off'],
     ['Renewal date needs fixing', datePassed, datePassed ? 'warn' : 'good', 'missing or passed without a quote'],
     ['Needs HubSpot fix', attention, attention ? 'bad' : 'good', 'no usable line item'],
+    ['No Zoho customer', noZoho, noZoho ? 'bad' : 'good', 'not quoted until one is mapped'],
     ['No accountant email', noEmail, noEmail ? 'warn' : 'good', 'these clients get WhatsApp only'],
     ['Unpaid cycles', unpaid, unpaid ? 'warn' : 'good', 'awaiting payment'],
     ['One-time quotes', data.additions.length, '', 'sent so far'],
@@ -381,6 +384,9 @@ function billingCell(deal) {
   const b = deal.billing;
   const badgeClass = b.kind === 'cycle' ? (b.months === 1 ? 'monthly' : 'term') : 'other';
   td.appendChild(el('span', 'badge ' + badgeClass, b.label));
+  if (b.kind === 'cycle' && !deal.zohoCustomer) {
+    td.appendChild(el('div', 'sub warn', 'Will not be quoted: no Zoho customer mapped'));
+  }
   if (b.paused && b.kind === 'cycle') {
     td.appendChild(el('div', 'sub warn', 'Paused — no quote goes out until Auto quote is switched back on'));
     return td;
@@ -503,6 +509,84 @@ function nameCell(deal) {
   return td;
 }
 
+// The existing Zoho Books customer the deal bills. Picked from a live name
+// search (the org stores customers under the company name, no email, and
+// has exact-name duplicates, so the id is what is stored and shown).
+function zohoCustomerCell(deal) {
+  const td = document.createElement('td');
+  const mapped = deal.zohoCustomer;
+  if (mapped) {
+    td.appendChild(el('div', 'deal', mapped.name));
+    const idRow = el('div', 'field-row');
+    idRow.appendChild(el('span', 'sub mono', mapped.id));
+    const clearBtn = el('button', 'btn secondary small', 'Clear');
+    clearBtn.type = 'button';
+    clearBtn.onclick = async () => {
+      if (!confirm('Clear the Zoho customer for ' + deal.dealName + '? It will not be quoted until one is picked again.')) return;
+      const done = busy(clearBtn, 'Clearing');
+      try {
+        await postJson('/admin/pricing/zoho-customer', { dealId: deal.dealId, customerId: '', dealName: deal.dealName });
+        toast('ok', deal.dealName + ': Zoho customer cleared — not quoted until one is picked');
+        await loadDeals();
+      } catch (err) {
+        toast('err', deal.dealName + ': ' + err.message, true);
+        done();
+      }
+    };
+    idRow.appendChild(clearBtn);
+    td.appendChild(idRow);
+  } else {
+    td.appendChild(el('div', 'sub warn', 'Not mapped — this client is NOT quoted until a Zoho customer is picked'));
+  }
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = mapped ? 'Change: search Zoho customers…' : 'Search Zoho customers…';
+  if (!mapped) input.value = deal.dealName.replace(/\\s*(<>|_)\\s*(VA|AiA)\\b.*$/i, '').trim();
+  const results = el('div', null);
+  results.style.display = 'grid';
+  results.style.gap = '4px';
+  results.style.marginTop = '4px';
+  let timer = null;
+  const search = async () => {
+    const q = input.value.trim();
+    results.innerHTML = '';
+    if (q.length < 2) return;
+    try {
+      const data = await fetch('/admin/pricing/zoho-customers?q=' + encodeURIComponent(q)).then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body.error || 'Search failed');
+        return body;
+      });
+      if (!data.customers.length) { results.appendChild(el('div', 'sub', 'No Zoho customer matches "' + q + '"')); return; }
+      for (const c of data.customers) {
+        const pick = el('button', 'btn secondary small', c.contactName + ' · ' + c.contactId + (c.email ? ' · ' + c.email : '') + (c.status !== 'active' ? ' · ' + c.status : ''));
+        pick.type = 'button';
+        pick.style.textAlign = 'left';
+        pick.onclick = async () => {
+          const done = busy(pick, 'Saving');
+          try {
+            await postJson('/admin/pricing/zoho-customer', { dealId: deal.dealId, customerId: c.contactId, dealName: deal.dealName });
+            toast('ok', deal.dealName + ': quotes will be billed to Zoho customer "' + c.contactName + '"');
+            await loadDeals();
+          } catch (err) {
+            toast('err', deal.dealName + ': ' + err.message, true);
+            done();
+          }
+        };
+        results.appendChild(pick);
+      }
+    } catch (err) {
+      results.appendChild(el('div', 'sub warn', err.message));
+    }
+  };
+  input.oninput = () => { clearTimeout(timer); timer = setTimeout(search, 300); };
+  input.onfocus = () => { if (!results.childElementCount) search(); };
+  td.appendChild(input);
+  td.appendChild(results);
+  return td;
+}
+
 // The date arrears are counted from: auto-computed from the deal's one
 // open unpaid cycle, with an admin-editable override and a reset back to auto.
 function pendingSinceCell(deal, today) {
@@ -597,6 +681,7 @@ function renderDeals(data) {
     tr.appendChild(nameTd);
 
     tr.appendChild(nameCell(deal));
+    tr.appendChild(zohoCustomerCell(deal));
     tr.appendChild(el('td', null, stageName(deal.dealStage)));
     tr.appendChild(billingCell(deal));
     tr.appendChild(pendingSinceCell(deal, data.cycle.today));

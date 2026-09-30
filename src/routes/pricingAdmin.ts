@@ -11,13 +11,20 @@ import {
 } from "../clients/hubspot.js";
 import { isValidWhatsappGroupId } from "../clients/periskope.js";
 import { fetchPaymentLink } from "../clients/razorpay.js";
+import { getCustomer, searchCustomers } from "../clients/zoho.js";
 import {
   findAdditionChargeById,
   findPaidUnsettledAdditionCharges,
   listRecentAdditionCharges,
   type AdditionCharge,
 } from "../repositories/additionCharges.js";
-import { setAutoQuote, setClientName, setPendingSinceOverride, upsertClientPricing } from "../repositories/clientPricing.js";
+import {
+  setAutoQuote,
+  setClientName,
+  setPendingSinceOverride,
+  setZohoCustomer,
+  upsertClientPricing,
+} from "../repositories/clientPricing.js";
 import { setWhatsappGroupId } from "../repositories/clients.js";
 import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
 import { createAdditionCharge } from "../steps/createAdditionCharge.js";
@@ -225,6 +232,9 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
         hubspotPrice,
         autoQuote: !paused,
         clientName: pricing?.client_name ?? null,
+        zohoCustomer: pricing?.zoho_customer_id
+          ? { id: pricing.zoho_customer_id, name: pricing.zoho_customer_name ?? "" }
+          : null,
         whatsappGroupId: groupIdByDealId.get(deal.dealId) ?? null,
         pendingSince: {
           auto: autoPendingSince,
@@ -320,6 +330,54 @@ pricingAdminRouter.post("/admin/pricing/client-name", async (req: Request, res: 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: "Failed to save the client name", details: message });
+  }
+});
+
+// The existing Zoho Books customer this deal bills. Picked on the admin
+// page from a live name search; the id is stored, the name re-read from
+// Zoho at save time. A deal with no mapping is not quoted.
+pricingAdminRouter.get("/admin/pricing/zoho-customers", async (req: Request, res: Response) => {
+  const parsed = z.object({ q: z.string().trim().min(2).max(100) }).safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Type at least 2 characters of the customer's name" });
+    return;
+  }
+  try {
+    res.status(200).json({ customers: await searchCustomers(parsed.data.q) });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to search Zoho customers", details: message });
+  }
+});
+
+const zohoCustomerSchema = z.object({
+  dealId: hubspotIdSchema,
+  customerId: z.union([z.literal(""), z.string().regex(/^\d+$/)]),
+  dealName: z.string().optional(),
+});
+
+pricingAdminRouter.post("/admin/pricing/zoho-customer", async (req: Request, res: Response) => {
+  const parsed = zohoCustomerSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseClient();
+    if (!parsed.data.customerId) {
+      await setZohoCustomer(supabase, parsed.data.dealId, null, parsed.data.dealName);
+      console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> Zoho customer cleared`);
+      res.status(200).json({ ok: true, customer: null });
+      return;
+    }
+    const customer = await getCustomer(parsed.data.customerId);
+    await setZohoCustomer(supabase, parsed.data.dealId, { id: customer.contactId, name: customer.contactName }, parsed.data.dealName);
+    console.log(`[pricingAdmin] deal ${parsed.data.dealId} -> Zoho customer ${customer.contactId} (${customer.contactName})`);
+    res.status(200).json({ ok: true, customer: { id: customer.contactId, name: customer.contactName } });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to save the Zoho customer", details: message });
   }
 });
 

@@ -149,6 +149,53 @@ export async function findOrCreateCustomer(
   return created.contact.contact_id;
 }
 
+export interface ZohoCustomerSummary {
+  contactId: string;
+  contactName: string;
+  companyName: string | null;
+  email: string | null;
+  status: string;
+}
+
+interface ZohoContactListEntry {
+  contact_id: string;
+  contact_name: string;
+  company_name?: string;
+  email?: string;
+  status: string;
+}
+
+// Existing customers by name, for the admin page's Zoho-customer picker.
+// The org's customers are stored under the company name with no email, so
+// name is the only useful key; the id is what gets stored.
+export async function searchCustomers(query: string): Promise<ZohoCustomerSummary[]> {
+  const params = new URLSearchParams({
+    organization_id: config.zoho.orgId,
+    contact_type: "customer",
+    contact_name_contains: query,
+    per_page: "50",
+  });
+  const result = (await zohoFetch(`/contacts?${params.toString()}`)) as { contacts?: ZohoContactListEntry[] };
+  return (result.contacts ?? []).map((c) => ({
+    contactId: c.contact_id,
+    contactName: c.contact_name,
+    companyName: c.company_name || null,
+    email: c.email || null,
+    status: c.status,
+  }));
+}
+
+export async function getCustomer(contactId: string): Promise<{ contactId: string; contactName: string }> {
+  const params = new URLSearchParams({ organization_id: config.zoho.orgId });
+  const result = (await zohoFetch(`/contacts/${encodeURIComponent(contactId)}?${params.toString()}`)) as {
+    contact?: { contact_id: string; contact_name: string };
+  };
+  if (!result.contact) {
+    throw new Error(`Zoho customer ${contactId} not found`);
+  }
+  return { contactId: result.contact.contact_id, contactName: result.contact.contact_name };
+}
+
 // GST18 (18%) and the "Professional fees New tax" TDS rate (10%), confirmed
 // against this org's real Settings > Taxes / GST TDS records (tax_id values
 // are org-specific and only discoverable via GET /settings/taxes or an

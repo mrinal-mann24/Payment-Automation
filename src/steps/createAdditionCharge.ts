@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { asEmailHtml, asWhatsapp, oneTimeSubject, quoteMessage } from "../utils/messages.js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
-import { createEstimate, emailEstimate, findOrCreateCustomer, getEstimatePdf } from "../clients/zoho.js";
+import { createEstimate, emailEstimate, getEstimatePdf } from "../clients/zoho.js";
 import { createPaymentLink } from "../clients/razorpay.js";
 import { sendDocumentMessage } from "../clients/periskope.js";
 import {
@@ -47,6 +47,12 @@ export async function createAdditionCharge(
   const deal = await fetchDealWithLineItemsAndContact(dealId);
   const pricing = await findClientPricing(supabase, dealId);
   const clientName = pricing?.client_name || null;
+  // Billed to the Zoho customer mapped on the admin page; refused before
+  // any row exists when there is none (decision 2026-09-30).
+  const zohoCustomerId = pricing?.zoho_customer_id;
+  if (!zohoCustomerId) {
+    throw new Error(`No Zoho customer mapped for deal ${dealId} (${deal.dealName}) — pick one on the admin page; nothing was quoted`);
+  }
 
   const duplicate = await findRecentDuplicateAdditionCharge(supabase, dealId, amount, service);
   if (duplicate) {
@@ -68,9 +74,8 @@ export async function createAdditionCharge(
   let total: number;
   let shortUrl: string;
   try {
-    const customerId = await findOrCreateCustomer(deal.contactEmail, deal.contactName);
     ({ estimateId, estimateNumber, total } = await createEstimate(
-      customerId,
+      zohoCustomerId,
       { ...deal, lineItems: [{ id: "", name: service, quantity: 1, price: amount }] },
       { key: `one-time-${row.id.slice(0, 8)}`, name: service, description: narration },
     ));

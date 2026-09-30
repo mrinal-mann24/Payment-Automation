@@ -18,10 +18,13 @@ payment. See `ARCHITECTURE.md` §7.)
   `POST /webhooks/renewal` call), the system shall fetch the full deal and
   its line items from the HubSpot API before doing anything else.
 - REQ-1.2 (Event) — When the deal's line items are retrieved, the system
-  shall create a Zoho Books estimate for a customer matched by contact
-  email.
-- REQ-1.3 (Unwanted) — If no matching Zoho customer exists, then the system
-  shall create one before creating the estimate.
+  shall create a Zoho Books estimate for the existing Zoho customer mapped
+  to the deal on the admin page (`client_pricing.zoho_customer_id`,
+  decision 2026-09-30; previously matched by contact email, which never
+  matched the company-named customers and created duplicates).
+- REQ-1.3 (Unwanted) — If no Zoho customer is mapped, then the system shall
+  refuse to quote the deal before creating any `renewal_jobs` row or Zoho
+  record, and the admin page shall flag it.
 - REQ-1.4 (Unwanted) — If a `renewal_jobs` row already exists for this
   `deal_id` and billing period with `zoho_step_status = done`, then the
   system shall skip estimate creation and reuse the stored
@@ -37,9 +40,11 @@ payment. See `ARCHITECTURE.md` §7.)
 - Trigger data (deal_id) is thin regardless of source (cron query result
   or webhook body) — always re-fetch from HubSpot, never trust it for
   money fields.
-- Customer matching: search Zoho customers by email first, create only on
-  a miss. Cache the mapping (e.g. on the `clients` Supabase table) so next
-  month's renewal skips the search.
+- Customer matching (2026-09-30): the admin picks the existing Zoho
+  customer per deal from a live name search; the id is stored on
+  `client_pricing` and used for every quote and one-time quote. No lookup
+  or creation by email any more (`findOrCreateCustomer` remains only for
+  `scripts/test-zoho-estimate.ts`).
 - Line items: 1:1 from HubSpot line items, free-form (no Zoho catalog
   item_id) — see `ARCHITECTURE.md` §6.
 

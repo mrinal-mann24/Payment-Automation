@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
-import { createEstimate, findOrCreateCustomer } from "../clients/zoho.js";
+import { createEstimate } from "../clients/zoho.js";
 import {
   claimZohoStep,
   createRenewalJob,
@@ -47,6 +47,17 @@ export async function createZohoEstimate(
     };
   }
 
+  // The quote is billed to the Zoho customer mapped on the admin page
+  // (decision 2026-09-30): the existing company record, never one looked
+  // up or created from the contact's email. Refused before any row exists.
+  const pricing = await findClientPricing(supabase, dealId);
+  const zohoCustomerId = pricing?.zoho_customer_id;
+  if (!zohoCustomerId) {
+    throw new Error(
+      `No Zoho customer mapped for deal ${dealId} (${deal.dealName}) — pick one on the admin page; nothing was quoted`,
+    );
+  }
+
   const job = existingJob ?? (await createRenewalJob(supabase, dealId, billingPeriod));
 
   if (job.zoho_step_status === "creating") {
@@ -82,8 +93,7 @@ export async function createZohoEstimate(
     // item that carries no price. With neither, nothing is billed rather
     // than guessed. One-off additions are billed separately
     // (src/steps/createAdditionCharge.ts), never folded into the renewal.
-    const pricing = await findClientPricing(supabase, dealId);
-    const basePrice = pricing?.base_price ?? null;
+    const basePrice = pricing.base_price ?? null;
     // The line item that prices this cycle is also where its narration
     // comes from: the accountant's own Description on it, when set
     // (decision 2026-09-29). Blank/whitespace falls back to the
@@ -123,9 +133,8 @@ export async function createZohoEstimate(
       }
     }
 
-    const customerId = await findOrCreateCustomer(deal.contactEmail, deal.contactName);
     const estimateLine = cycle ? { key: cycle.key, description: narration ?? cycle.period.narration } : undefined;
-    const { estimateId, estimateNumber, total } = await createEstimate(customerId, dealForEstimate, estimateLine);
+    const { estimateId, estimateNumber, total } = await createEstimate(zohoCustomerId, dealForEstimate, estimateLine);
 
     // createEstimate has already thrown if there was no line item to bill.
     const billedPrice = dealForEstimate.lineItems[0]!.price;

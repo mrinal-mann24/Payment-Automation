@@ -8,6 +8,8 @@ export interface ClientPricing {
   auto_quote: boolean; // false = the admin switched this client's automatic quotes off
   client_name: string | null; // admin-set; "Hi <client_name>" instead of "Hi Team" when set
   pending_since_override: string | null; // admin's arrears override (YYYY-MM-DD); the auto default is derived live, never stored
+  zoho_customer_id: string | null; // the existing Zoho Books customer this deal bills; null = not quoted until mapped
+  zoho_customer_name: string | null; // display copy of that customer's name, taken from Zoho at save time
   created_at: string;
   updated_at: string;
 }
@@ -124,6 +126,31 @@ export async function setPendingSinceOverride(
 
   if (error) {
     throw new Error(`Failed to save the pending-since override: ${error.message}`);
+  }
+}
+
+// Admin page: map the deal to an existing Zoho customer, or clear it (null).
+export async function setZohoCustomer(
+  supabase: SupabaseClient,
+  dealId: string,
+  customer: { id: string; name: string } | null,
+  dealName?: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("client_pricing")
+    .upsert(
+      {
+        hubspot_deal_id: dealId,
+        zoho_customer_id: customer?.id ?? null,
+        zoho_customer_name: customer?.name ?? null,
+        ...(dealName ? { deal_name: dealName } : {}),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "hubspot_deal_id" },
+    );
+
+  if (error) {
+    throw new Error(`Failed to save the Zoho customer: ${error.message}`);
   }
 }
 

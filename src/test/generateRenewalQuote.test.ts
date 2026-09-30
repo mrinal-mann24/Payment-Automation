@@ -86,6 +86,8 @@ describe("generateRenewalQuote (POST /webhooks/renewal)", () => {
       auto_quote: false,
       client_name: null,
       pending_since_override: null,
+      zoho_customer_id: null,
+      zoho_customer_name: null,
       created_at: "2026-09-23T00:00:00Z",
       updated_at: "2026-09-23T00:00:00Z",
     });

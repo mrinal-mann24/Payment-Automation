@@ -454,6 +454,8 @@ same day)
 | auto_quote | boolean | default true; admin pause switch (added migration 0013, see below) |
 | client_name | text \| null | added migration 0014 (2026-09-29); the name used to greet the client ("Hi `<Name>`") in every message; always null until the admin types it on the admin page — never auto-filled from HubSpot |
 | pending_since_override | date \| null | added migration 0014 (2026-09-29); admin override for the date arrears are counted from; the auto default (never stored) is the deal's one open unpaid cycle's `service_period_start` — see §3.8's reminders bullet |
+| zoho_customer_id | text \| null | added migration 0015 (2026-09-30); the existing Zoho Books customer this deal's quotes/invoices are billed to, picked on the admin page (`POST /admin/pricing/zoho-customer`, search via `GET /admin/pricing/zoho-customers?q=`); **null = the deal is not quoted** |
+| zoho_customer_name | text \| null | display copy of that customer's `contact_name`, re-read from Zoho at save time |
 | created_at / updated_at | timestamptz | |
 
 **Backfilled 2026-07-31**: all 27 existing rows (seeded before this
@@ -791,8 +793,14 @@ existing steps; there is no new table and no second state machine.
   `HubspotDeal.billingEmails` is empty, no email is sent and the step
   records "no Accountant Email on the HubSpot deal" as `email_error` (business decision 2026-09-22: no
   fallback to the contact; the Billing POC Email field is not used). The
-  contact stays the Zoho customer identity, and a deal with no contact is
-  billable when the Accountant Email is set; explicit subject/body
+  Zoho customer is the one **mapped on the admin page**
+  (`client_pricing.zoho_customer_id`, decision 2026-09-30 — the org's
+  customers are stored under the company name with no email, so the old
+  email lookup never matched and created a person-named duplicate every
+  time); a deal with no mapping is **not quoted** (`createZohoEstimate` /
+  `createAdditionCharge` refuse before any row exists, the page shows a
+  "No Zoho customer" tile and a per-deal warning). A deal with no contact
+  is billable when the Accountant Email is set; explicit subject/body
   carrying the Razorpay link), best-effort: `estimate_email_sent` /
   `invoice_email_sent` / `email_error`. **Not yet exercised live** — scope
   and PDF-attachment behaviour to confirm.

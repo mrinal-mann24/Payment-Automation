@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEstimate, emailEstimate, emailInvoice, recordInvoicePayment } from "../clients/zoho.js";
+import { createEstimate, emailEstimate, emailInvoice, getCustomer, recordInvoicePayment, searchCustomers } from "../clients/zoho.js";
 
 const originalFetch = global.fetch;
 
@@ -79,6 +79,64 @@ describe("createEstimate", () => {
     const lineItem = (captured.body!.line_items as Array<Record<string, unknown>>)[0]!;
     expect(lineItem).toMatchObject({ name: "Service", rate: 5000, quantity: 2 });
     expect(lineItem).not.toHaveProperty("description");
+  });
+});
+
+describe("searchCustomers / getCustomer", () => {
+  function mockContactsFetch(): { urls: string[] } {
+    const captured = { urls: [] as string[] };
+    global.fetch = vi.fn(async (url: string | URL | Request) => {
+      const path = String(url);
+      if (path.startsWith("https://accounts.zoho.in/")) {
+        return new Response(JSON.stringify({ access_token: "tok", expires_in: 3600 }), { status: 200 });
+      }
+      captured.urls.push(path);
+      if (path.includes("/contacts/2273874000000777001?")) {
+        return new Response(
+          JSON.stringify({ contact: { contact_id: "2273874000000777001", contact_name: "Test RenewalAutomation", status: "active" } }),
+          { status: 200 },
+        );
+      }
+      if (path.includes("/contacts?")) {
+        return new Response(
+          JSON.stringify({
+            contacts: [
+              { contact_id: "2273874000000777001", contact_name: "Test RenewalAutomation", company_name: "", email: "", status: "active" },
+              { contact_id: "2273874000000918216", contact_name: "Forelife Health Systems Private Limited", company_name: "Forelife Health Systems Private Limited", status: "active" },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${path}`);
+    }) as unknown as typeof fetch;
+    return captured;
+  }
+
+  it("searches Zoho's customers by name and returns id, name, company and email (blank as null)", async () => {
+    const captured = mockContactsFetch();
+
+    const customers = await searchCustomers("Test Renewal");
+
+    expect(captured.urls[0]).toContain("/contacts?");
+    expect(captured.urls[0]).toContain("contact_type=customer");
+    expect(captured.urls[0]).toContain("contact_name_contains=Test+Renewal");
+    expect(customers).toEqual([
+      { contactId: "2273874000000777001", contactName: "Test RenewalAutomation", companyName: null, email: null, status: "active" },
+      {
+        contactId: "2273874000000918216",
+        contactName: "Forelife Health Systems Private Limited",
+        companyName: "Forelife Health Systems Private Limited",
+        email: null,
+        status: "active",
+      },
+    ]);
+  });
+
+  it("reads one customer back by id", async () => {
+    mockContactsFetch();
+
+    expect(await getCustomer("2273874000000777001")).toEqual({ contactId: "2273874000000777001", contactName: "Test RenewalAutomation" });
   });
 });
 

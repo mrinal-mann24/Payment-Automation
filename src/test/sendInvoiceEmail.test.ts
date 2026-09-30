@@ -109,6 +109,8 @@ describe("sendInvoiceEmail", () => {
       auto_quote: true,
       client_name: "Rajesh",
       pending_since_override: null,
+      zoho_customer_id: null,
+      zoho_customer_name: null,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     });
