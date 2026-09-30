@@ -747,7 +747,9 @@ existing steps; there is no new table and no second state machine.
   only on-demand path is the secret-protected `POST /webhooks/renewal`
   (`src/jobs/generateRenewalQuote.ts`: same classification, no window, 409
   for a not-due, unsupported or unlisted deal). Skips deals with an unpaid
-  legacy quote; ~5 s between deals. The legacy `runRenewalCheck(cycleDealIds,
+  legacy quote; a random 1–3 minute gap between deals (`randomPauseMs`,
+  decision 2026-09-30 — a fixed beat looks automated to WhatsApp's
+  anti-spam; reminders keep their fixed 5 s). The legacy `runRenewalCheck(cycleDealIds,
   now)` skips every deal a cycle owns. Shared step sequence:
   `src/jobs/renewalPipeline.ts`.
 - **Quote content** (`createEstimate(customerId, deal, line)`): one line,

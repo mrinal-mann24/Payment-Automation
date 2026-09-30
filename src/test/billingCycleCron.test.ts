@@ -10,7 +10,27 @@ import { fetchVaDealsWithLineItems, type HubspotLineItem, type VaDealWithLineIte
 import { runRenewalPipeline } from "../jobs/renewalPipeline.js";
 import { findOpenLegacyJob } from "../repositories/renewalJobs.js";
 import { findPausedDealIds } from "../repositories/clientPricing.js";
-import { classifyVaDeals, isBilledByCycles, runBillingCycleCheck } from "../jobs/billingCycleCron.js";
+import {
+  DEFAULT_PAUSE_RANGE_MS,
+  classifyVaDeals,
+  isBilledByCycles,
+  randomPauseMs,
+  runBillingCycleCheck,
+} from "../jobs/billingCycleCron.js";
+
+describe("randomPauseMs", () => {
+  it("draws a gap anywhere between min and max, so quotes never leave on a fixed beat", () => {
+    const range = { min: 60_000, max: 180_000 };
+    expect(randomPauseMs(range, () => 0)).toBe(60_000);
+    expect(randomPauseMs(range, () => 1)).toBe(180_000);
+    expect(randomPauseMs(range, () => 0.5)).toBe(120_000);
+    expect(randomPauseMs({ min: 0, max: 0 }, Math.random)).toBe(0);
+  });
+
+  it("defaults to 1–3 minutes between quotes", () => {
+    expect(DEFAULT_PAUSE_RANGE_MS).toEqual({ min: 60_000, max: 180_000 });
+  });
+});
 
 const item = (overrides: Partial<HubspotLineItem> = {}): HubspotLineItem => ({
   id: "li-1",
@@ -97,7 +117,7 @@ describe("classifyVaDeals", () => {
 
 describe("runBillingCycleCheck", () => {
   it("quotes every client whose Next Renewal Date is today, monthly at the base price and quarterly at the last-paid amount", async () => {
-    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
+    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
 
     expect(generated()).toEqual([
       ["due-1", "2026-10-01", 1, 5000],
@@ -111,14 +131,14 @@ describe("runBillingCycleCheck", () => {
     vi.mocked(findPausedDealIds).mockResolvedValue(new Set(["due-2", "quarterly-today"]));
 
     const classified = await classifyVaDeals(istTick(1));
-    await runBillingCycleCheck(classified, { pauseMs: 0 });
+    await runBillingCycleCheck(classified, { pauseRangeMs: { min: 0, max: 0 } });
 
     expect(classified.paused).toEqual(new Set(["due-2", "quarterly-today"]));
     expect(generated().map((g) => g[0])).toEqual(["due-1", "seven-month"]);
   });
 
   it("quotes a client on their own date, whatever day of the month it is", async () => {
-    await runBillingCycleCheck(await classifyVaDeals(istTick(9)), { pauseMs: 0 });
+    await runBillingCycleCheck(await classifyVaDeals(istTick(9)), { pauseRangeMs: { min: 0, max: 0 } });
 
     expect(generated()).toEqual([["future", "2026-10-09", 3, 39000]]);
   });
@@ -129,7 +149,7 @@ describe("runBillingCycleCheck", () => {
       deal("four-days", "2026-09-27", [item()]),
     ]);
 
-    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
+    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
 
     expect(generated().map((g) => g[0])).toEqual(["three-days"]);
   });
@@ -139,7 +159,7 @@ describe("runBillingCycleCheck", () => {
       dealId === "due-1" ? ({ zoho_estimate_number: "QT-9" } as never) : null,
     );
 
-    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
+    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
 
     expect(generated().map((g) => g[0])).toEqual(["due-2", "quarterly-today", "seven-month"]);
   });
@@ -147,7 +167,7 @@ describe("runBillingCycleCheck", () => {
   it("keeps going when one deal fails", async () => {
     vi.mocked(runRenewalPipeline).mockRejectedValueOnce(new Error("Zoho Books API error 500"));
 
-    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseMs: 0 });
+    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
 
     expect(generated().map((g) => g[0])).toEqual(["due-1", "due-2", "quarterly-today", "seven-month"]);
   });

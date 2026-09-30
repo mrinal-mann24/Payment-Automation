@@ -132,6 +132,13 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-30 (random gap between quotes) — `runBillingCycleCheck` now
+  waits a random **1–3 minutes** between deals (`randomPauseMs`,
+  `DEFAULT_PAUSE_RANGE_MS`, option `pauseRangeMs`) instead of a fixed 5 s,
+  logging "waiting …s before the next quote", so the WhatsApp number's
+  sending pattern is not machine-regular. 11:00 start unchanged; reminders
+  unchanged (business choice). On the 1st (~13 quotes) the run takes
+  ~15–40 min; `noOverlap` covers it. 267/267.
 - 2026-09-30 (quote amount in the message) — The quote message (WhatsApp
   and email, renewals and one-time quotes) now states the pre-tax amount:
   "Please find attached the quotation for September’26 **amounted -

@@ -65,6 +65,10 @@ unchanged for yearly customers and deals with no usable line item.
   legacy cron.
 - **Sender (2026-09-23):** quote and invoice emails go out from the Zoho
   organisation email, to be set to accounts@aiaccountant.com in Zoho.
+- **Random gap between quotes (2026-09-30):** the 11:00 IST run waits a
+  random 1–3 minutes between one client's quote and the next (was a fixed
+  5 s), so the Periskope number's cadence does not look automated. Start
+  time and reminders are unchanged.
 - **Quote message amount (2026-09-30):** the quote message names the
   pre-tax figure — "…the quotation for September’26 amounted - ₹40,000
   +GST. Kindly arrange the payment…" — from `renewal_jobs.billed_price`

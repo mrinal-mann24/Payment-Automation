@@ -21,9 +21,14 @@ export interface ClassifiedVaDeals {
 // admin page flags it and the team corrects the date in HubSpot, so a
 // client whose record is merely behind is not chased automatically.
 export const GENERATION_WINDOW_DAYS = 4;
-// One WhatsApp number sends many document messages in a row on the 1st;
-// pause between deals rather than burst.
-const DEFAULT_PAUSE_MS = 5000;
+// One WhatsApp number sends many document messages in a row on the 1st. A
+// random gap between deals (not a fixed beat) keeps the cadence from
+// looking automated to WhatsApp's anti-spam (decision 2026-09-30).
+export const DEFAULT_PAUSE_RANGE_MS = { min: 60_000, max: 180_000 };
+
+export function randomPauseMs(range: { min: number; max: number }, random: () => number = Math.random): number {
+  return Math.round(range.min + random() * (range.max - range.min));
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,10 +72,10 @@ export function cycleToGenerate(
 
 export async function runBillingCycleCheck(
   classified: ClassifiedVaDeals,
-  options: { pauseMs?: number } = {},
+  options: { pauseRangeMs?: { min: number; max: number } } = {},
 ): Promise<void> {
   const { today, deals, paused } = classified;
-  const pauseMs = options.pauseMs ?? DEFAULT_PAUSE_MS;
+  const pauseRangeMs = options.pauseRangeMs ?? DEFAULT_PAUSE_RANGE_MS;
   const supabase = getSupabaseClient();
   console.log(`[billingCycle] ${today}: checking ${deals.length} active VA deal(s)`);
 
@@ -86,8 +91,12 @@ export async function runBillingCycleCheck(
       continue;
     }
 
-    if (attempted > 0 && pauseMs > 0) {
-      await sleep(pauseMs);
+    if (attempted > 0) {
+      const wait = randomPauseMs(pauseRangeMs);
+      if (wait > 0) {
+        console.log(`[billingCycle] waiting ${Math.round(wait / 1000)}s before the next quote`);
+        await sleep(wait);
+      }
     }
     attempted++;
 
