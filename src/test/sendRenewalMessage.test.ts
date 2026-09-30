@@ -138,6 +138,20 @@ describe("sendRenewalMessage", () => {
     expect(markPeriskopeSent).toHaveBeenCalledWith(fakeSupabase, "job-1");
   });
 
+  it("states the pre-tax amount of the quote (billed_price) in the message", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob, billed_price: 40000, service_period_start: "2026-10-01", term_months: 1 });
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+    vi.mocked(getEstimatePdf).mockResolvedValue(Buffer.from("pdf-bytes"));
+
+    await sendRenewalMessage(fakeSupabase, "deal-1", "2026-07");
+
+    expect(sendDocumentMessage).toHaveBeenCalledWith(
+      "919876543210",
+      expect.stringContaining("the quotation for October’26 amounted - ₹40,000 +GST."),
+      expect.any(Object),
+    );
+  });
+
   it("greets the client by name when client_pricing.client_name is set", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue({ ...baseJob });
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });

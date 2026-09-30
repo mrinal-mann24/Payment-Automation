@@ -51,7 +51,7 @@ export async function sendQuoteEmail(
     await emailEstimate(job.zoho_estimate_id, {
       to: deal.billingEmails,
       subject: `Virtual Accounting quote ${job.zoho_estimate_number}`,
-      body: asEmailHtml(quoteMessage(period, job.razorpay_short_url, pricing?.client_name || null)),
+      body: asEmailHtml(quoteMessage(period, job.razorpay_short_url, pricing?.client_name || null, job.billed_price)),
     });
 
     await markEstimateEmailSent(supabase, job.id);

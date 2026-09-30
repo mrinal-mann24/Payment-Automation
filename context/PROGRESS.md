@@ -132,6 +132,13 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-09-30 (quote amount in the message) — The quote message (WhatsApp
+  and email, renewals and one-time quotes) now states the pre-tax amount:
+  "Please find attached the quotation for September’26 **amounted -
+  ₹40,000 +GST**. Kindly arrange the payment…" (business wording).
+  `quoteMessage(subject, payLink, name, amount)`; renewals pass
+  `renewal_jobs.billed_price`, one-time quotes their amount; a row with no
+  recorded price (older rows) leaves the clause out. 265/265.
 - 2026-09-30 (line name back to "Virtual Accounting", editable WhatsApp
   group) — (1) Every cycle quote's Zoho line is named **"Virtual
   Accounting"** again, for every deal, reversing yesterday's change to the

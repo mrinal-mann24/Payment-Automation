@@ -104,7 +104,7 @@ export async function createAdditionCharge(
       const pdf = await getEstimatePdf(estimateId);
       await sendDocumentMessage(
         target.recipient,
-        asWhatsapp(quoteMessage(oneTimeSubject(service, narration), shortUrl, clientName)),
+        asWhatsapp(quoteMessage(oneTimeSubject(service, narration), shortUrl, clientName, amount)),
         { base64: pdf.toString("base64"), filename: `${estimateNumber}.pdf`, mimetype: "application/pdf" },
       );
       periskopeSent = true;
@@ -129,7 +129,7 @@ export async function createAdditionCharge(
     await emailEstimate(estimateId, {
       to: deal.billingEmails,
       subject: `Quote ${estimateNumber} — ${service}`,
-      body: asEmailHtml(quoteMessage(oneTimeSubject(service, narration), shortUrl, clientName)),
+      body: asEmailHtml(quoteMessage(oneTimeSubject(service, narration), shortUrl, clientName, amount)),
     });
     await markAdditionEstimateEmailSent(supabase, row.id);
     emailSent = true;

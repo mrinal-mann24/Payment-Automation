@@ -52,7 +52,14 @@ export async function sendRenewalMessage(
 
   const pricing = await findClientPricing(supabase, dealId);
   const pdf = await getEstimatePdf(job.zoho_estimate_id);
-  const message = asWhatsapp(quoteMessage(job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null, job.razorpay_short_url, pricing?.client_name || null));
+  const message = asWhatsapp(
+    quoteMessage(
+      job.service_period_start ? periodLabel(job.service_period_start, job.term_months ?? 1) : null,
+      job.razorpay_short_url,
+      pricing?.client_name || null,
+      job.billed_price,
+    ),
+  );
 
   await sendDocumentMessage(target.recipient, message, {
     base64: pdf.toString("base64"),

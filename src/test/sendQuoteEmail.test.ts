@@ -94,7 +94,7 @@ describe("sendQuoteEmail", () => {
     expect(emailEstimate).toHaveBeenCalledWith("zest-123", {
       to: ["client@example.com"],
       subject: expect.stringContaining("QT-000123"),
-      body: expect.stringContaining("Please find attached the quotation for October’26."),
+      body: expect.stringContaining("Please find attached the quotation for October’26 amounted - ₹5,000 +GST."),
     });
     expect(vi.mocked(emailEstimate).mock.calls[0]![1].body).toContain("Pay online: https://rzp.io/i/1");
     expect(markEstimateEmailSent).toHaveBeenCalledWith(fakeSupabase, "job-1");

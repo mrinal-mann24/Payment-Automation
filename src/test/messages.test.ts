@@ -19,14 +19,21 @@ describe("periodLabel", () => {
 });
 
 describe("quote and invoice messages", () => {
-  it("uses the business wording for the quote and keeps the payment link", () => {
-    expect(asWhatsapp(quoteMessage("September’26", "https://rzp.io/i/1"))).toBe(
+  it("uses the business wording for the quote, with the pre-tax amount, and keeps the payment link", () => {
+    expect(asWhatsapp(quoteMessage("September’26", "https://rzp.io/i/1", null, 40000))).toBe(
       [
         "Hi Team,",
-        "Please find attached the quotation for September’26. Kindly arrange the payment and let us know once the payment has been completed.",
+        "Please find attached the quotation for September’26 amounted - ₹40,000 +GST. Kindly arrange the payment and let us know once the payment has been completed.",
         "Pay online: https://rzp.io/i/1",
         "Thank you!",
       ].join("\n"),
+    );
+    expect(asWhatsapp(quoteMessage("Site visit", null, null, 27902.5))).toContain("for Site visit amounted - ₹27,902.5 +GST.");
+  });
+
+  it("leaves the amount out when none is known (legacy rows)", () => {
+    expect(asWhatsapp(quoteMessage("September’26", "https://rzp.io/i/1"))).toContain(
+      "Please find attached the quotation for September’26. Kindly arrange the payment",
     );
   });
 

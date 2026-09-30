@@ -65,6 +65,10 @@ unchanged for yearly customers and deals with no usable line item.
   legacy cron.
 - **Sender (2026-09-23):** quote and invoice emails go out from the Zoho
   organisation email, to be set to accounts@aiaccountant.com in Zoho.
+- **Quote message amount (2026-09-30):** the quote message names the
+  pre-tax figure — "…the quotation for September’26 amounted - ₹40,000
+  +GST. Kindly arrange the payment…" — from `renewal_jobs.billed_price`
+  (one-time quotes: their amount).
 - **Quote line name (2026-09-30):** every cycle quote's line is
   "Virtual Accounting" for every deal; the HubSpot line item's own name is
   not used (a one-day experiment on 2026-09-29, reversed).

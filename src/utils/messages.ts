@@ -35,13 +35,26 @@ export function periodLabel(periodStart: string, months: number): string {
   return `${monthLabel(periodStart)} to ${monthLabel(servicePeriodFrom(periodStart, months).end)}`;
 }
 
+// "₹40,000" — Indian grouping, no trailing .00 (business wording 2026-09-30:
+// "amounted - xxx +GST", so this is the pre-tax figure).
+function rupees(amount: number): string {
+  return `₹${amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
 // `subject` is what the document is for: a period label, or the service of
 // a one-time quote. Null leaves it out (legacy rows have no period).
 // `name`, when set, replaces the "Hi Team" default with "Hi <name>".
-export function quoteMessage(subject: string | null, payLink: string | null, name: string | null = null): string[] {
+// `amount` is the quote's pre-tax figure; null (older rows) leaves it out.
+export function quoteMessage(
+  subject: string | null,
+  payLink: string | null,
+  name: string | null = null,
+  amount: number | null = null,
+): string[] {
+  const amounted = amount === null ? "" : ` amounted - ${rupees(amount)} +GST`;
   return [
     `${greeting(name)},`,
-    `Please find attached the quotation${subject ? ` for ${subject}` : ""}. Kindly arrange the payment and let us know once the payment has been completed.`,
+    `Please find attached the quotation${subject ? ` for ${subject}` : ""}${amounted}. Kindly arrange the payment and let us know once the payment has been completed.`,
     ...(payLink ? [`Pay online: ${payLink}`] : []),
     "Thank you!",
   ];
