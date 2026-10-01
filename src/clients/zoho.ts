@@ -202,7 +202,23 @@ export async function getCustomer(contactId: string): Promise<{ contactId: strin
 // existing estimate that already applies them — not derivable from the tax
 // name/percentage alone).
 const GST18_TAX_ID = "2273874000000030203";
+// IGST18 for a customer outside the org's state — Zoho refuses the GST18
+// group on an inter-state quote (code 3032, first hit 2026-10-01 on an
+// Uttar Pradesh customer). Id taken from that customer's past invoices.
+const IGST18_TAX_ID = "2273874000000030101";
+// The org is registered in Karnataka: a customer whose place_of_contact is
+// "KA" is intra-state (GST18), any other state is inter-state (IGST18).
+const ORG_STATE_CODE = "KA";
 const PROFESSIONAL_FEES_TDS_TAX_ID = "2273874000000527020";
+
+async function gstTaxIdFor(customerId: string): Promise<string> {
+  const params = new URLSearchParams({ organization_id: config.zoho.orgId });
+  const result = (await zohoFetch(`/contacts/${encodeURIComponent(customerId)}?${params.toString()}`)) as {
+    contact?: { place_of_contact?: string };
+  };
+  const place = result.contact?.place_of_contact?.trim().toUpperCase();
+  return place && place !== ORG_STATE_CODE ? IGST18_TAX_ID : GST18_TAX_ID;
+}
 
 interface ZohoEstimateCreateResponse {
   estimate: {
@@ -243,6 +259,7 @@ export async function createEstimate(
       }
     : { name: firstLineItem.name, rate: firstLineItem.price, quantity: firstLineItem.quantity };
 
+  const taxId = await gstTaxIdFor(customerId);
   const result = (await zohoFetch(`/estimates?${params.toString()}`, {
     method: "POST",
     body: JSON.stringify({
@@ -251,7 +268,7 @@ export async function createEstimate(
       line_items: [
         {
           ...lineItem,
-          tax_id: GST18_TAX_ID,
+          tax_id: taxId,
           tds_tax_id: PROFESSIONAL_FEES_TDS_TAX_ID,
         },
       ],

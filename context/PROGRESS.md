@@ -132,6 +132,16 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-10-01 (inter-state GST on quotes) — First real 11:00 run: quotes
+  for customers outside Karnataka failed with Zoho 400 code 3032 "IGST has
+  to be applied as this is an interstate transaction" (Debu Seth →
+  ADROIDEX, Navaekadhasi), because `createEstimate` hard-coded the
+  intra-state GST18 group. It now reads the customer's `place_of_contact`
+  (`GET /contacts/{id}`) and applies **IGST18** (`2273874000000030101`,
+  taken from that customer's past invoices) when it is not "KA", GST18
+  otherwise (blank → GST18). The failed rows stay `zoho_step_status =
+  failed` and are retried by the next tick within the 4-day window (or via
+  `POST /webhooks/renewal`) once this is deployed. 274/274.
 - 2026-09-30 (Zoho customer mapping) — Quotes and invoices were landing
   under a **new** Zoho customer every time: `findOrCreateCustomer` looked
   customers up by the contact's email, but the org's 724 customers are

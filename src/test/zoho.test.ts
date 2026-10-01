@@ -14,13 +14,21 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-// Routes the OAuth refresh to a canned token and captures the /estimates body.
-function mockZohoFetch(): { body?: Record<string, unknown> } {
+// Routes the OAuth refresh to a canned token, answers the customer lookup
+// (place of contact decides intra- vs inter-state GST) and captures the
+// /estimates body.
+function mockZohoFetch(placeOfContact = "KA"): { body?: Record<string, unknown> } {
   const captured: { body?: Record<string, unknown> } = {};
   global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const path = String(url);
     if (path.startsWith("https://accounts.zoho.in/")) {
       return new Response(JSON.stringify({ access_token: "tok", expires_in: 3600 }), { status: 200 });
+    }
+    if (path.includes("/contacts/zcust-1?")) {
+      return new Response(
+        JSON.stringify({ contact: { contact_id: "zcust-1", contact_name: "Acme", place_of_contact: placeOfContact } }),
+        { status: 200 },
+      );
     }
     if (path.includes("/estimates?")) {
       captured.body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -68,6 +76,24 @@ describe("createEstimate", () => {
         },
       ],
     });
+  });
+
+  it("applies IGST18 instead of the intra-state GST18 group when the customer is in another state", async () => {
+    const captured = mockZohoFetch("UP");
+
+    await createEstimate("zcust-1", deal, { key: "2026-10", description: "Service period: 1 October 2026 to 31 October 2026" });
+
+    const lineItem = (captured.body!.line_items as Array<Record<string, unknown>>)[0]!;
+    expect(lineItem).toMatchObject({ tax_id: "2273874000000030101", tds_tax_id: "2273874000000527020" });
+  });
+
+  it("keeps the intra-state GST18 group when the customer's place of contact is blank", async () => {
+    const captured = mockZohoFetch("");
+
+    await createEstimate("zcust-1", deal);
+
+    const lineItem = (captured.body!.line_items as Array<Record<string, unknown>>)[0]!;
+    expect(lineItem).toMatchObject({ tax_id: "2273874000000030203" });
   });
 
   it("keeps the legacy payload unchanged when no cycle is given", async () => {
