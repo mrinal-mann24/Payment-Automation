@@ -44,8 +44,13 @@ cron.schedule("0 11 * * *", async () => {
   await runSettlementSweep().catch((err) => {
     console.error("[settlementSweep] run failed:", err);
   });
+}, { timezone: "Asia/Kolkata", noOverlap: true });
 
-  await runOverdueReminderCheck(now).catch((err) => {
+// Payment reminders go at 12:00 IST, an hour after the quotes (business
+// decision 2026-10-05), on their own schedule so a long quote run (random
+// gaps, up to ~40 minutes on the 1st) never delays or overlaps them.
+cron.schedule("0 12 * * *", async () => {
+  await runOverdueReminderCheck(new Date()).catch((err) => {
     console.error("[reminderCron] run failed:", err);
   });
 }, { timezone: "Asia/Kolkata", noOverlap: true });

@@ -132,6 +132,11 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-10-05 (reminders at 12:00 IST) — Payment reminders now run on their
+  own cron at **12:00 IST** (`src/index.ts`), an hour after the 11:00 quote
+  tick, instead of at the end of it (business request); a long quote run
+  can no longer delay or overlap them. Quotes, the legacy check and the
+  settlement sweep stay at 11:00. Schedule: day 5 / 9 / 12 unchanged.
 - 2026-10-01 (inter-state GST on quotes) — First real 11:00 run: quotes
   for customers outside Karnataka failed with Zoho 400 code 3032 "IGST has
   to be applied as this is an interstate transaction" (Debu Seth →

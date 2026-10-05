@@ -16,7 +16,7 @@ the original "invoice creation is out of scope" decision).
 
 ## 2. High-level flow
 ```
-Daily cron (this backend, in-process, node-cron @ 11:00 IST, noOverlap)
+Daily cron (this backend, in-process, node-cron @ 11:00 IST, noOverlap; payment reminders run on a second cron @ 12:00 IST since 2026-10-05)
   -> classify every active VA deal once (HubSpot batch read, §3.8):
      monthly <=> deal billing_cycle = Monthly AND latest line item monthly/P1M
   -> Monthly generator (IST days 1-4): for each monthly deal not yet
