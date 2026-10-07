@@ -57,7 +57,18 @@ export function cycleToGenerate(
   classification: DealClassification,
   today: string,
 ): { cycle: BillingCycle; reason: null } | { cycle: null; reason: string } {
-  if (classification.kind !== "cycle" || !classification.due) {
+  if (classification.kind !== "cycle") {
+    return { cycle: null, reason: classification.reason };
+  }
+  // A monthly client is quoted on the 1st–4th of every month, unpaid or not
+  // and whatever HubSpot's Next Renewal Date says (decision 2026-10-07: the
+  // date only moves when a client pays, and another integration rewrites
+  // it, so Nirved and RapidFix were never quoted). The row is keyed by the
+  // month, so the retry days reuse it. Longer terms still follow their date.
+  if (classification.months === 1 && Number(today.slice(8, 10)) <= GENERATION_WINDOW_DAYS) {
+    return { cycle: billingCycleFrom(monthStart(today), 1, classification.amount), reason: null };
+  }
+  if (!classification.due) {
     return { cycle: null, reason: classification.reason };
   }
   const age = daysBetween(classification.periodStart, today);

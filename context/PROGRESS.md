@@ -132,6 +132,18 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-10-07 (monthly clients are always quoted on the 1st) — Every
+  unpaused **monthly** client is now quoted on the 1st–4th of every month
+  (`cycleToGenerate`), unpaid previous month or not, whatever HubSpot's Next
+  Renewal Date says — Nirved (date 1 Jul) and RapidFix (1 Sep) were never
+  quoted on 1 October because that date only moves when a client pays (and
+  another integration resets it). Quarterly and longer clients still follow
+  their date and the 4-day window; paused clients are still skipped. Because
+  quotes can now pile up unpaid, the reminder arrears line counts from the
+  deal's **earliest unpaid cycle** (`findEarliestUnpaidCycleStart`), still
+  overridable by Pending since. Dry run for 1 Nov 2026: 11 clients quoted
+  (incl. Nirved ₹40,000, RapidFix ₹15,000); 10 paused skipped (Forelife and
+  Umang among them). 288/288.
 - 2026-10-07 (quote period = month of issue) — A quote's service period is
   now always **the calendar month it is issued in** (`monthStart(today)`;
   a quarterly client quoted in October is October–December), for the 11:00

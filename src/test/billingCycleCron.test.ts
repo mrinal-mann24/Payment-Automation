@@ -123,18 +123,41 @@ describe("runBillingCycleCheck", () => {
       ["due-1", "2026-10-01", 1, 5000],
       ["due-2", "2026-10-01", 1, 5000],
       ["quarterly-today", "2026-10-01", 3, 39000],
+      // Monthly clients are quoted every month whatever HubSpot's date says
+      // (decision 2026-10-07): a stale date and a missing date included.
+      ["stale", "2026-10-01", 1, 5000],
+      ["no-date", "2026-10-01", 1, 5000],
       ["seven-month", "2026-10-01", 7, 27902],
     ]);
   });
 
+  it("quotes a monthly client on the 1st–4th of the month even when its HubSpot date is old, but not on the 5th", async () => {
+    vi.mocked(fetchVaDealsWithLineItems).mockResolvedValue([deal("stale-monthly", "2026-07-01", [item()])]);
+
+    await runBillingCycleCheck(await classifyVaDeals(istTick(4)), { pauseRangeMs: { min: 0, max: 0 } });
+    expect(generated()).toEqual([["stale-monthly", "2026-10-01", 1, 5000]]);
+
+    vi.mocked(runRenewalPipeline).mockClear();
+    await runBillingCycleCheck(await classifyVaDeals(istTick(5)), { pauseRangeMs: { min: 0, max: 0 } });
+    expect(generated()).toEqual([]);
+  });
+
+  it("does not make a multi-month client monthly: a stale quarterly date is still left for the team to fix", async () => {
+    vi.mocked(fetchVaDealsWithLineItems).mockResolvedValue([deal("stale-quarterly", "2026-07-01", [quarterlyItem])]);
+
+    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
+
+    expect(generated()).toEqual([]);
+  });
+
   it("never quotes a client whose auto quote is switched off on the admin page", async () => {
-    vi.mocked(findPausedDealIds).mockResolvedValue(new Set(["due-2", "quarterly-today"]));
+    vi.mocked(findPausedDealIds).mockResolvedValue(new Set(["due-2", "quarterly-today", "stale"]));
 
     const classified = await classifyVaDeals(istTick(1));
     await runBillingCycleCheck(classified, { pauseRangeMs: { min: 0, max: 0 } });
 
-    expect(classified.paused).toEqual(new Set(["due-2", "quarterly-today"]));
-    expect(generated().map((g) => g[0])).toEqual(["due-1", "seven-month"]);
+    expect(classified.paused).toEqual(new Set(["due-2", "quarterly-today", "stale"]));
+    expect(generated().map((g) => g[0])).toEqual(["due-1", "no-date", "seven-month"]);
   });
 
   it("quotes a client on their own date, for the month the quote is issued in (decision 2026-10-07)", async () => {
@@ -151,10 +174,10 @@ describe("runBillingCycleCheck", () => {
     expect(generated()).toEqual([["three-days", "2026-10-01", 1, 5000]]);
   });
 
-  it("retries for three days after the date and then leaves it to the team to fix in HubSpot", async () => {
+  it("retries a multi-month client for three days after its date and then leaves it to the team to fix in HubSpot", async () => {
     vi.mocked(fetchVaDealsWithLineItems).mockResolvedValue([
-      deal("three-days", "2026-09-28", [item()]),
-      deal("four-days", "2026-09-27", [item()]),
+      deal("three-days", "2026-09-28", [quarterlyItem]),
+      deal("four-days", "2026-09-27", [quarterlyItem]),
     ]);
 
     await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
@@ -169,7 +192,7 @@ describe("runBillingCycleCheck", () => {
 
     await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
 
-    expect(generated().map((g) => g[0])).toEqual(["due-2", "quarterly-today", "seven-month"]);
+    expect(generated().map((g) => g[0])).toEqual(["due-2", "quarterly-today", "stale", "no-date", "seven-month"]);
   });
 
   it("keeps going when one deal fails", async () => {
@@ -177,6 +200,6 @@ describe("runBillingCycleCheck", () => {
 
     await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
 
-    expect(generated().map((g) => g[0])).toEqual(["due-1", "due-2", "quarterly-today", "seven-month"]);
+    expect(generated().map((g) => g[0])).toEqual(["due-1", "due-2", "quarterly-today", "stale", "no-date", "seven-month"]);
   });
 });

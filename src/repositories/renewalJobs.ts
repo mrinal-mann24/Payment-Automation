@@ -102,6 +102,27 @@ export async function findUnpaidCycleJobs(supabase: SupabaseClient): Promise<Ren
   return (data ?? []) as RenewalJob[];
 }
 
+// The start date of the oldest cycle of this deal that is still unpaid —
+// the arrears basis now that a new month is quoted while an older one is
+// still open. Null when nothing is unpaid.
+export async function findEarliestUnpaidCycleStart(supabase: SupabaseClient, dealId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("renewal_jobs")
+    .select("service_period_start")
+    .eq("hubspot_deal_id", dealId)
+    .eq("razorpay_step_status", "done")
+    .is("paid_at", null)
+    .not("service_period_start", "is", null)
+    .order("service_period_start", { ascending: true })
+    .limit(1);
+
+  if (error) {
+    throw new Error(`Failed to look up the earliest unpaid cycle for deal ${dealId}: ${error.message}`);
+  }
+
+  return (data?.[0]?.service_period_start as string | undefined) ?? null;
+}
+
 // A legacy (due-date keyed) cycle for this deal that has a quote out but no
 // payment yet. The monthly generator skips such deals so a customer is
 // never asked to pay two quotes for overlapping periods.

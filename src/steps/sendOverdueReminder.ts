@@ -5,6 +5,7 @@ import { sendTextMessage } from "../clients/periskope.js";
 import { findClientPricing } from "../repositories/clientPricing.js";
 import {
   claimReminder,
+  findEarliestUnpaidCycleStart,
   findRenewalJob,
   markReminderSkipped,
   releaseReminder,
@@ -71,9 +72,10 @@ export async function sendOverdueReminder(
 
   const pricing = await findClientPricing(supabase, dealId);
   const name = pricing?.client_name || null;
-  // The one open unpaid cycle for this deal (this job itself) is the
-  // arrears basis unless the admin has set an override.
-  const pendingSince = pricing?.pending_since_override ?? job.service_period_start;
+  // Arrears count from the deal's earliest unpaid cycle (a new month is
+  // quoted while an older one is still open) unless the admin set an override.
+  const earliestUnpaid = await findEarliestUnpaidCycleStart(supabase, dealId);
+  const pendingSince = pricing?.pending_since_override ?? earliestUnpaid ?? job.service_period_start;
   const monthsPending = pendingSince ? monthsPendingSince(pendingSince, job.term_months ?? 1, today) : 0;
   const arrearsLine =
     monthsPending >= ARREARS_THRESHOLD_MONTHS

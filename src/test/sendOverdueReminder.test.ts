@@ -10,6 +10,7 @@ vi.mock("../clients/periskope.js", () => ({
 }));
 vi.mock("../repositories/renewalJobs.js", () => ({
   findRenewalJob: vi.fn(),
+  findEarliestUnpaidCycleStart: vi.fn(),
   claimReminder: vi.fn(),
   releaseReminder: vi.fn(),
   markReminderSkipped: vi.fn(),
@@ -27,7 +28,13 @@ import { fetchDealWithLineItemsAndContact } from "../clients/hubspot.js";
 import { findWhatsappGroupId } from "../repositories/clients.js";
 import { findClientPricing } from "../repositories/clientPricing.js";
 import { isValidWhatsappRecipient, sendTextMessage } from "../clients/periskope.js";
-import { claimReminder, findRenewalJob, markReminderSkipped, releaseReminder } from "../repositories/renewalJobs.js";
+import {
+  claimReminder,
+  findEarliestUnpaidCycleStart,
+  findRenewalJob,
+  markReminderSkipped,
+  releaseReminder,
+} from "../repositories/renewalJobs.js";
 import { sendOverdueReminder } from "../steps/sendOverdueReminder.js";
 
 const fakeSupabase = {} as SupabaseClient;
@@ -93,6 +100,7 @@ beforeEach(() => {
   vi.mocked(findWhatsappGroupId).mockResolvedValue(null);
   vi.mocked(claimReminder).mockResolvedValue(true);
   vi.mocked(findClientPricing).mockResolvedValue(null);
+  vi.mocked(findEarliestUnpaidCycleStart).mockResolvedValue(null);
 });
 
 describe("sendOverdueReminder", () => {
@@ -240,6 +248,20 @@ describe("sendOverdueReminder — name and arrears", () => {
 
     await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
 
+    expect(sendTextMessage).toHaveBeenCalledWith(
+      "919876543210",
+      expect.stringContaining("You currently have pending payments for the last 2 months (since May 2026)."),
+    );
+  });
+
+  it("counts the arrears from the deal's earliest unpaid cycle, because a new month is quoted while the old one is still open", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue({ ...cycleJob, service_period_start: "2026-07-01" }); // this month's quote
+    vi.mocked(findEarliestUnpaidCycleStart).mockResolvedValue("2026-05-01"); // an older quote is still unpaid
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({ ...fakeDeal });
+
+    await sendOverdueReminder(fakeSupabase, "deal-1", "Monthly-2026-07-10", 1, TODAY);
+
+    expect(findEarliestUnpaidCycleStart).toHaveBeenCalledWith(fakeSupabase, "deal-1");
     expect(sendTextMessage).toHaveBeenCalledWith(
       "919876543210",
       expect.stringContaining("You currently have pending payments for the last 2 months (since May 2026)."),
