@@ -533,6 +533,29 @@ export async function findAdminCycleJobs(supabase: SupabaseClient, currentMonthK
   return (data ?? []) as RenewalJob[];
 }
 
+// The payment export: every unpaid cycle (the caller keeps the overdue ones)
+// plus paid cycles — those whose service period started in `paidMonth`
+// (YYYY-MM), or every paid cycle when it is null.
+export async function findExportJobs(supabase: SupabaseClient, paidMonth: string | null): Promise<RenewalJob[]> {
+  const unpaid = await supabase.from("renewal_jobs").select("*").is("paid_at", null).not("service_period_start", "is", null);
+  if (unpaid.error) {
+    throw new Error(`Failed to look up unpaid renewal_jobs rows for the export: ${unpaid.error.message}`);
+  }
+
+  let paidQuery = supabase.from("renewal_jobs").select("*").not("paid_at", "is", null).not("service_period_start", "is", null);
+  if (paidMonth) {
+    const [year, month] = paidMonth.split("-").map(Number) as [number, number];
+    const nextMonthStart = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+    paidQuery = paidQuery.gte("service_period_start", `${paidMonth}-01`).lt("service_period_start", nextMonthStart);
+  }
+  const paid = await paidQuery;
+  if (paid.error) {
+    throw new Error(`Failed to look up paid renewal_jobs rows for the export: ${paid.error.message}`);
+  }
+
+  return [...((paid.data ?? []) as RenewalJob[]), ...((unpaid.data ?? []) as RenewalJob[])];
+}
+
 export async function findRenewalJobById(supabase: SupabaseClient, jobId: string): Promise<RenewalJob | null> {
   const { data, error } = await supabase.from("renewal_jobs").select("*").eq("id", jobId).maybeSingle();
 

@@ -26,7 +26,8 @@ import {
   upsertClientPricing,
 } from "../repositories/clientPricing.js";
 import { setWhatsappGroupId } from "../repositories/clients.js";
-import { findAdminCycleJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
+import { findAdminCycleJobs, findExportJobs, findRenewalJobById, type RenewalJob } from "../repositories/renewalJobs.js";
+import { buildExportRows, exportCsv } from "../utils/paymentExport.js";
 import { createAdditionCharge } from "../steps/createAdditionCharge.js";
 import { settleAdditionPayment } from "../steps/settleAdditionPayment.js";
 import {
@@ -257,6 +258,47 @@ pricingAdminRouter.get("/admin/pricing/deals", async (_req: Request, res: Respon
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: "Failed to load deals", details: message });
+  }
+});
+
+// Payment export (CSV for Excel): customers who have paid, and customers who
+// have not paid with the due date passed. `month` (YYYY-MM, default the
+// current month, or "all") picks which paid cycles are listed; every unpaid
+// overdue cycle is always listed, whatever month it started.
+const exportQuerySchema = z.object({
+  month: z.union([z.literal("all"), z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)]).optional(),
+});
+
+pricingAdminRouter.get("/admin/pricing/export.csv", async (req: Request, res: Response) => {
+  const parsed = exportQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: "month must look like 2026-10, or be \"all\"" });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseClient();
+    const today = istToday();
+    const paidMonth = parsed.data.month === "all" ? null : (parsed.data.month ?? billingMonthKey());
+    const [jobs, deals, pricing] = await Promise.all([
+      findExportJobs(supabase, paidMonth),
+      fetchVaDealsWithLineItems(),
+      supabase.from("client_pricing").select("hubspot_deal_id, deal_name"),
+    ]);
+    if (pricing.error) throw new Error(pricing.error.message);
+
+    const names = new Map<string, string>();
+    for (const row of pricing.data ?? []) {
+      if (row.deal_name) names.set(row.hubspot_deal_id as string, row.deal_name as string);
+    }
+    for (const deal of deals) names.set(deal.dealId, deal.dealName);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="payments-${today}.csv"`);
+    res.status(200).send(exportCsv(buildExportRows(jobs, names, today)));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Failed to build the export", details: message });
   }
 });
 

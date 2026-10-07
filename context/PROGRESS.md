@@ -132,6 +132,17 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-10-07 (payment export) — New **Export CSV** on the admin page's
+  Billing-cycles card (`GET /admin/pricing/export.csv?month=YYYY-MM|all`):
+  one file for Excel (UTF-8 with BOM, formula-safe cells) with two
+  categories — **Paid** (quote, invoice, amount, date, method, reference;
+  cycles that started in the chosen month, default this month, or all time)
+  and **Unpaid - overdue** (every unpaid cycle whose due date, the cycle
+  start, has passed: days overdue, reminders sent, payment link). Pure
+  logic in `src/utils/paymentExport.ts`, query `findExportJobs`. Cycle
+  quotes only — one-time quotes are not included. 282/282; live: 2 paid +
+  10 unpaid rows. Note: the "Reminders sent" count includes the stamps set
+  by hand on 2026-10-05 to switch reminders off (Forelife, Umang, Ragnayor).
 - 2026-10-05 (reminders at 12:00 IST) — Payment reminders now run on their
   own cron at **12:00 IST** (`src/index.ts`), an hour after the 11:00 quote
   tick, instead of at the end of it (business request); a long quote run

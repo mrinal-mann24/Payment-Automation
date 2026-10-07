@@ -190,6 +190,12 @@ export const pricingAdminHtml = `<!doctype html>
     <div class="card-head">
       <h2>Billing cycles</h2>
       <span class="count" id="cycles-count"></span>
+      <div class="field-row" style="margin-left:auto">
+        <label for="export-month" style="color:var(--muted);font-size:0.82rem">Export: paid customers for</label>
+        <input type="month" id="export-month" aria-label="Month of paid customers to export (blank = this month)">
+        <button type="button" class="btn secondary small" id="export-btn">Export CSV</button>
+        <button type="button" class="btn secondary small" id="export-all-btn">All time</button>
+      </div>
       <p id="cycles-subtitle"></p>
     </div>
     <div class="table-wrap">
@@ -1079,6 +1085,16 @@ document.getElementById('refresh-btn').onclick = async () => {
   } finally {
     done();
   }
+};
+
+// Payment export: paid customers (one month, or all time) plus every unpaid
+// customer whose due date has passed, as a CSV that opens in Excel.
+document.getElementById('export-btn').onclick = () => {
+  const month = document.getElementById('export-month').value;
+  window.location.href = '/admin/pricing/export.csv' + (month ? '?month=' + encodeURIComponent(month) : '');
+};
+document.getElementById('export-all-btn').onclick = () => {
+  window.location.href = '/admin/pricing/export.csv?month=all';
 };
 
 loadDeals().catch((err) => {
