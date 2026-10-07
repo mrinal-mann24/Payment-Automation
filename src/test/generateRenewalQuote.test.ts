@@ -70,11 +70,22 @@ describe("generateRenewalQuote (POST /webhooks/renewal)", () => {
     expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-10-01", months: 1, amount: 5000 });
   });
 
-  it("quotes a client whose date passed weeks ago — the manual route ignores the catch-up window", async () => {
+  it("quotes a client whose date passed weeks ago for the month it is issued in — the manual route ignores the catch-up window", async () => {
     const outcome = await generateRenewalQuote(fakeSupabase, "quarterly-stale", oct1);
 
     expect(outcome.kind).toBe("cycle");
-    expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-08-10", months: 3, amount: 21000 });
+    expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({
+      key: "2026-10-01",
+      months: 3,
+      amount: 21000,
+      period: { start: "2026-10-01", end: "2026-12-31" },
+    });
+  });
+
+  it("a stale HubSpot date never decides the month: issued on 7 October, the period is October", async () => {
+    await generateRenewalQuote(fakeSupabase, "quarterly-stale", new Date("2026-10-07T10:30:00Z"));
+
+    expect(vi.mocked(runRenewalPipeline).mock.calls[0]![2]).toMatchObject({ key: "2026-10-01" });
   });
 
   it("refuses a client whose auto quote is switched off on the admin page, even when due", async () => {

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchVaDealsWithLineItems } from "../clients/hubspot.js";
 import { findClientPricing } from "../repositories/clientPricing.js";
-import { billingCycleFrom, istToday } from "../utils/billingCycle.js";
+import { billingCycleFrom, istToday, monthStart } from "../utils/billingCycle.js";
 import { classifyDeal, type DealClassification } from "../utils/monthlyEligibility.js";
 import { runRenewalPipeline, type RenewalPipelineResult } from "./renewalPipeline.js";
 
@@ -44,7 +44,7 @@ export async function generateRenewalQuote(
       if (!classification.due) {
         throw new QuoteNotDueError(classification.reason);
       }
-      const cycle = billingCycleFrom(classification.periodStart, classification.months, classification.amount);
+      const cycle = billingCycleFrom(monthStart(istToday(now)), classification.months, classification.amount);
       return { kind: "cycle", result: await runRenewalPipeline(supabase, dealId, cycle) };
     }
     case "none":

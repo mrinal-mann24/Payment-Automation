@@ -6,6 +6,7 @@ import {
   daysBetween,
   isSunday,
   istToday,
+  monthStart,
   monthsPendingSince,
   nextRenewalDateAfter,
   servicePeriodFrom,
@@ -17,6 +18,13 @@ describe("istToday", () => {
   it("uses the IST calendar date, not UTC (the container runs in UTC)", () => {
     expect(istToday(new Date("2026-09-30T18:29:59Z"))).toBe("2026-09-30");
     expect(istToday(new Date("2026-09-30T18:30:00Z"))).toBe("2026-10-01");
+  });
+});
+
+describe("monthStart", () => {
+  it("is the first day of the month of the given IST date", () => {
+    expect(monthStart("2026-10-07")).toBe("2026-10-01");
+    expect(monthStart("2026-12-31")).toBe("2026-12-01");
   });
 });
 

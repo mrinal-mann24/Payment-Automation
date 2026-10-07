@@ -137,10 +137,18 @@ describe("runBillingCycleCheck", () => {
     expect(generated().map((g) => g[0])).toEqual(["due-1", "seven-month"]);
   });
 
-  it("quotes a client on their own date, whatever day of the month it is", async () => {
+  it("quotes a client on their own date, for the month the quote is issued in (decision 2026-10-07)", async () => {
     await runBillingCycleCheck(await classifyVaDeals(istTick(9)), { pauseRangeMs: { min: 0, max: 0 } });
 
-    expect(generated()).toEqual([["future", "2026-10-09", 3, 39000]]);
+    expect(generated()).toEqual([["future", "2026-10-01", 3, 39000]]);
+  });
+
+  it("a catch-up quote a few days after the date is still for the month it is issued in", async () => {
+    vi.mocked(fetchVaDealsWithLineItems).mockResolvedValue([deal("three-days", "2026-09-28", [item()])]);
+
+    await runBillingCycleCheck(await classifyVaDeals(istTick(1)), { pauseRangeMs: { min: 0, max: 0 } });
+
+    expect(generated()).toEqual([["three-days", "2026-10-01", 1, 5000]]);
   });
 
   it("retries for three days after the date and then leaves it to the team to fix in HubSpot", async () => {

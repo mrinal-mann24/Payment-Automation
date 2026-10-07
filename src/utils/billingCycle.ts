@@ -14,6 +14,14 @@ export function istToday(now: Date = new Date()): string {
   return new Date(now.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+// The first day of the month of an IST date: a quote always covers the
+// month it is issued in (decision 2026-10-07), whatever HubSpot's Next
+// Renewal Date says — that date only decides *when* a client is due, and
+// another integration was found overwriting it.
+export function monthStart(isoDate: string): string {
+  return `${isoDate.slice(0, 7)}-01`;
+}
+
 // The IST calendar month (YYYY-MM) for an instant — used by the admin page
 // to list every cycle that started this month.
 export function billingMonthKey(now: Date = new Date()): string {

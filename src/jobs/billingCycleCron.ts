@@ -3,7 +3,7 @@ import { fetchVaDealsWithLineItems, type VaDealWithLineItems } from "../clients/
 import { findPausedDealIds } from "../repositories/clientPricing.js";
 import { findOpenLegacyJob } from "../repositories/renewalJobs.js";
 import { classifyDeal, type DealClassification } from "../utils/monthlyEligibility.js";
-import { billingCycleFrom, daysBetween, istToday, type BillingCycle } from "../utils/billingCycle.js";
+import { billingCycleFrom, daysBetween, istToday, monthStart, type BillingCycle } from "../utils/billingCycle.js";
 import { runRenewalPipeline } from "./renewalPipeline.js";
 
 export interface ClassifiedDeal extends VaDealWithLineItems {
@@ -67,7 +67,7 @@ export function cycleToGenerate(
       reason: `Next Renewal Date ${classification.periodStart} passed ${age} days ago without a quote — outside the ${GENERATION_WINDOW_DAYS}-day window; update it in HubSpot`,
     };
   }
-  return { cycle: billingCycleFrom(classification.periodStart, classification.months, classification.amount), reason: null };
+  return { cycle: billingCycleFrom(monthStart(today), classification.months, classification.amount), reason: null };
 }
 
 export async function runBillingCycleCheck(

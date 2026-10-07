@@ -132,6 +132,16 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-10-07 (quote period = month of issue) — A quote's service period is
+  now always **the calendar month it is issued in** (`monthStart(today)`;
+  a quarterly client quoted in October is October–December), for the 11:00
+  run and the on-demand route, whatever HubSpot's Next Renewal Date says
+  (that date now only decides *when* a client is due, within the 4-day
+  window). Found while redoing Nirved and RapidFix: their quotes came out as
+  August and September from stale dates, and **another HubSpot integration
+  (id 33710650) overwrites `next_renewal_date` back to the old value within
+  seconds/minutes** of our change — so the date cannot be relied on. After
+  payment the date still moves to the 1st of the next month. 285/285.
 - 2026-10-07 (payment export) — New **Export CSV** on the admin page's
   Billing-cycles card (`GET /admin/pricing/export.csv?month=YYYY-MM|all`):
   one file for Excel (UTF-8 with BOM, formula-safe cells) with two
