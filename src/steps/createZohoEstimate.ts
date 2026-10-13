@@ -87,11 +87,11 @@ export async function createZohoEstimate(
   }
 
   try {
-    // HubSpot is the price: the recurring line item with the latest billing
-    // start date, unit price × quantity (decision 2026-09-28). The
-    // client_pricing base price per month is only the fallback for a line
-    // item that carries no price. With neither, nothing is billed rather
-    // than guessed. One-off additions are billed separately
+    // The client_pricing base price (per month) is the price (decision
+    // 2026-10-13, reversing 2026-09-28). HubSpot — the recurring line item
+    // with the latest billing start date, unit price × quantity — is only
+    // the fallback for a client with no base price. With neither, nothing is
+    // billed rather than guessed. One-off additions are billed separately
     // (src/steps/createAdditionCharge.ts), never folded into the renewal.
     const basePrice = pricing.base_price ?? null;
     // The line item that prices this cycle is also where its narration
@@ -103,7 +103,7 @@ export async function createZohoEstimate(
 
     let dealForEstimate = deal;
     if (cycle) {
-      const price = cycle.amount ?? (basePrice === null ? null : basePrice * cycle.months);
+      const price = basePrice === null ? cycle.amount : basePrice * cycle.months;
       if (price === null) {
         throw new Error(
           `No price on the HubSpot line item and no base price in client_pricing for deal ${dealId}; refusing to guess a price for cycle ${cycle.key}`,
@@ -115,9 +115,7 @@ export async function createZohoEstimate(
       // client-specific text.
       dealForEstimate = { ...deal, lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price }] };
     } else {
-      if (latest && latest.price > 0) {
-        dealForEstimate = { ...deal, lineItems: [{ ...latest, name: cleanLineItemName(latest.name) }] };
-      } else if (basePrice !== null) {
+      if (basePrice !== null) {
         const firstLineItem = latest ?? deal.lineItems[0];
         dealForEstimate = {
           ...deal,
@@ -130,6 +128,8 @@ export async function createZohoEstimate(
             },
           ],
         };
+      } else if (latest && latest.price > 0) {
+        dealForEstimate = { ...deal, lineItems: [{ ...latest, name: cleanLineItemName(latest.name) }] };
       }
     }
 

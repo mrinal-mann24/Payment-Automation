@@ -132,6 +132,19 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-10-13 (Supabase base price is the price; HubSpot is the fallback) —
+  Reverses the 2026-09-28 rule. `createZohoEstimate` now bills
+  `client_pricing.base_price` × the cycle length for a cycle quote (and the
+  base price as is on the legacy yearly path); HubSpot's line item price is
+  used only for a client with no base price, and with neither the quote is
+  refused as before. HubSpot still sets the cycle length, the date and the
+  narration. The admin Billing cell shows "from the base price" and warns
+  "HubSpot line item says ₹X — ignored while a base price is set" when the
+  two differ. **Data to fix before the 1 Nov run** (found on the switch): He
+  Spoke / Prem Sah base 30,000 vs 10,000 billed in October; Laundry Labs
+  base 39,000 is a quarterly total, so ×3 would quote 117,000 (per-month
+  should be 13,000). Files: `src/steps/createZohoEstimate.ts`,
+  `src/routes/pricingAdminPage.ts`, `src/test/createZohoEstimate.test.ts`.
 - 2026-10-12 (Piyush annual quote, line discount) — `createEstimate`'s
   `EstimateLine` gained an optional `discountPercent`: the line keeps the
   full rate and shows the percentage in Zoho's Discount column

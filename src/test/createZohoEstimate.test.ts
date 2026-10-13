@@ -373,11 +373,44 @@ describe("createZohoEstimate with a term (quarterly) cycle", () => {
   });
 });
 
-describe("createZohoEstimate — HubSpot price first, base price as the fallback", () => {
-  it("bills the HubSpot amount for a monthly cycle even when a base price exists", async () => {
+describe("createZohoEstimate — Supabase base price first, HubSpot as the fallback", () => {
+  it("bills the base price for a monthly cycle even when HubSpot has a different amount", async () => {
     vi.mocked(findRenewalJob).mockResolvedValue(null);
     vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
     vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+    vi.mocked(findOrCreateCustomer).mockResolvedValue("2273874000000777001");
+    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-9", estimateNumber: "QT-9", total: 5400 });
+
+    await createZohoEstimate(fakeSupabase, "deal-1", { ...octoberCycle, amount: 40000 });
+
+    expect(createEstimate).toHaveBeenCalledWith(
+      "2273874000000777001",
+      expect.objectContaining({ lineItems: [expect.objectContaining({ price: 5000, quantity: 1 })] }),
+      expect.anything(),
+    );
+    expect(markZohoStepDone).toHaveBeenCalledWith(fakeSupabase, "job-3", "zest-9", "QT-9", 5400, expect.objectContaining({ price: 5000 }));
+  });
+
+  it("bills the base price per month times the cycle length for a term cycle, ignoring the HubSpot amount", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue({ ...pendingCycleJob, billing_period: "2026-10-09" });
+    vi.mocked(findClientPricing).mockResolvedValue({ ...pricingRow, base_price: 5000 });
+    vi.mocked(findOrCreateCustomer).mockResolvedValue("2273874000000777001");
+    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-q", estimateNumber: "QT-Q", total: 16200 });
+
+    await createZohoEstimate(fakeSupabase, "deal-1", { ...quarterlyCycle, amount: 39000 });
+
+    expect(createEstimate).toHaveBeenCalledWith(
+      "2273874000000777001",
+      expect.objectContaining({ lineItems: [expect.objectContaining({ price: 15000, quantity: 1 })] }),
+      expect.anything(),
+    );
+  });
+
+  it("falls back to the HubSpot amount when the client has no base price", async () => {
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
+    vi.mocked(findClientPricing).mockResolvedValue({ ...pricingRow, base_price: null });
     vi.mocked(findOrCreateCustomer).mockResolvedValue("2273874000000777001");
     vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-9", estimateNumber: "QT-9", total: 43200 });
 
@@ -390,23 +423,7 @@ describe("createZohoEstimate — HubSpot price first, base price as the fallback
     );
   });
 
-  it("falls back to the base price per month times the cycle length when HubSpot has no price", async () => {
-    vi.mocked(findRenewalJob).mockResolvedValue(null);
-    vi.mocked(createRenewalJob).mockResolvedValue({ ...pendingCycleJob, billing_period: "2026-10-09" });
-    vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
-    vi.mocked(findOrCreateCustomer).mockResolvedValue("2273874000000777001");
-    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-q", estimateNumber: "QT-Q", total: 16200 });
-
-    await createZohoEstimate(fakeSupabase, "deal-1", { ...quarterlyCycle, amount: null });
-
-    expect(createEstimate).toHaveBeenCalledWith(
-      "2273874000000777001",
-      expect.objectContaining({ lineItems: [expect.objectContaining({ price: 15000, quantity: 1 })] }),
-      expect.anything(),
-    );
-  });
-
-  it("on the legacy yearly path bills the line item with the latest billing start date, not the base price", async () => {
+  it("on the legacy yearly path bills the base price when there is one", async () => {
     vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
       ...fakeDeal,
       lineItems: [
@@ -417,6 +434,27 @@ describe("createZohoEstimate — HubSpot price first, base price as the fallback
     vi.mocked(findRenewalJob).mockResolvedValue(null);
     vi.mocked(createRenewalJob).mockResolvedValue({ ...pendingCycleJob, billing_period: "2026-07" });
     vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+    vi.mocked(findOrCreateCustomer).mockResolvedValue("2273874000000777001");
+    vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-y", estimateNumber: "QT-Y", total: 48600 });
+
+    await createZohoEstimate(fakeSupabase, "deal-1");
+
+    const billed = vi.mocked(createEstimate).mock.calls[0]![1].lineItems;
+    expect(billed).toHaveLength(1);
+    expect(billed[0]).toMatchObject({ name: "All VA Services", price: 5000, quantity: 1 });
+  });
+
+  it("on the legacy yearly path falls back to the line item with the latest billing start date when there is no base price", async () => {
+    vi.mocked(fetchDealWithLineItemsAndContact).mockResolvedValue({
+      ...fakeDeal,
+      lineItems: [
+        { id: "backlog", name: "Accounting Backlogs", quantity: 1, price: 30000, billingStartDate: "2026-04-28", billingPeriodTerm: null },
+        { id: "yearly", name: "All VA Services", quantity: 1, price: 45000, billingStartDate: "2026-04-29", billingPeriodTerm: "P1Y" },
+      ],
+    });
+    vi.mocked(findRenewalJob).mockResolvedValue(null);
+    vi.mocked(createRenewalJob).mockResolvedValue({ ...pendingCycleJob, billing_period: "2026-07" });
+    vi.mocked(findClientPricing).mockResolvedValue({ ...pricingRow, base_price: null });
     vi.mocked(findOrCreateCustomer).mockResolvedValue("2273874000000777001");
     vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-y", estimateNumber: "QT-Y", total: 48600 });
 
@@ -502,7 +540,7 @@ describe("createZohoEstimate — the quote's line name is always \"Virtual Accou
     });
     vi.mocked(findRenewalJob).mockResolvedValue(null);
     vi.mocked(createRenewalJob).mockResolvedValue(pendingCycleJob);
-    vi.mocked(findClientPricing).mockResolvedValue(pricingRow);
+    vi.mocked(findClientPricing).mockResolvedValue({ ...pricingRow, base_price: null });
     vi.mocked(findOrCreateCustomer).mockResolvedValue("2273874000000777001");
     vi.mocked(createEstimate).mockResolvedValue({ estimateId: "zest-9", estimateNumber: "QT-9", total: 43200 });
 

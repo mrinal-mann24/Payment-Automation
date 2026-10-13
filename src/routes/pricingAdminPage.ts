@@ -399,15 +399,20 @@ function billingCell(deal) {
   }
   if (b.kind !== 'cycle') {
     td.appendChild(el('div', 'sub', b.reason));
-    if (deal.hubspotPrice !== null) td.appendChild(el('div', 'sub', 'Quote ' + money(deal.hubspotPrice) + ' before tax, from the HubSpot line item'));
+    if (deal.basePrice !== null) td.appendChild(el('div', 'sub', 'Quote ' + money(deal.basePrice) + ' before tax, from the base price'));
+    else if (deal.hubspotPrice !== null) td.appendChild(el('div', 'sub', 'Quote ' + money(deal.hubspotPrice) + ' before tax, from the HubSpot line item (no base price)'));
     return td;
   }
-  if (b.amount !== null) {
-    td.appendChild(el('div', 'sub', 'Quote ' + money(b.amount) + ' before tax, from the HubSpot line item'));
-  } else if (deal.basePrice !== null) {
-    td.appendChild(el('div', 'sub', 'Quote ' + money(deal.basePrice * b.months) + ' before tax, from the base price (no price in HubSpot)'));
+  if (deal.basePrice !== null) {
+    const quote = deal.basePrice * b.months;
+    td.appendChild(el('div', 'sub', 'Quote ' + money(quote) + ' before tax, from the base price'));
+    if (b.amount !== null && b.amount !== quote) {
+      td.appendChild(el('div', 'sub warn', 'HubSpot line item says ' + money(b.amount) + ' — it is ignored while a base price is set'));
+    }
+  } else if (b.amount !== null) {
+    td.appendChild(el('div', 'sub', 'Quote ' + money(b.amount) + ' before tax, from the HubSpot line item (no base price)'));
   } else {
-    td.appendChild(el('div', 'sub warn', 'No price on the HubSpot line item and no base price: the quote cannot be created'));
+    td.appendChild(el('div', 'sub warn', 'No base price and no price on the HubSpot line item: the quote cannot be created'));
   }
   if (!b.periodStart) {
     td.appendChild(el('div', 'sub warn', b.reason + ' — set the Next Renewal Date in HubSpot'));
