@@ -132,6 +132,21 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-10-12 (Piyush annual quote, line discount) — `createEstimate`'s
+  `EstimateLine` gained an optional `discountPercent`: the line keeps the
+  full rate and shows the percentage in Zoho's Discount column
+  (`discount: "5%"`, `discount_type: "item_level"`,
+  `is_discount_before_tax: true`), so GST and TDS are computed on the
+  discounted value. Used once, by a hand-run script, for Piyush's annual
+  payment from 1 Sep 2026: 12 × ₹7,000 = ₹84,000 less 5% = ₹79,800 taxable,
+  GST ₹14,364, TDS ₹7,980, quote and Razorpay link ₹86,184 (QT-000557, an
+  `addition_charges` row with `periskope_sent=false` and skip reason "held
+  for admin review", so it settles through the normal payment webhook once
+  sent). The earlier draft QT-000556 was cancelled and its row deleted; its
+  Zoho estimate and the old quarterly QT-000554 (row deleted, link
+  cancelled) are declined by hand in Zoho. Piyush stays paused. No admin-page
+  control for discounts. Files: `src/clients/zoho.ts`,
+  `src/test/zoho.test.ts`.
 - 2026-10-07 (monthly clients are always quoted on the 1st) — Every
   unpaused **monthly** client is now quoted on the 1st–4th of every month
   (`cycleToGenerate`), unpaid previous month or not, whatever HubSpot's Next

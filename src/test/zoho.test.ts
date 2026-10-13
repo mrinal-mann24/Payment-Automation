@@ -106,6 +106,30 @@ describe("createEstimate", () => {
     expect(lineItem).toMatchObject({ name: "Service", rate: 5000, quantity: 2 });
     expect(lineItem).not.toHaveProperty("description");
   });
+
+  it("shows a percentage discount on the line (before tax) when one is given, at the full rate", async () => {
+    const captured = mockZohoFetch();
+
+    await createEstimate("zcust-1", { ...deal, lineItems: [{ id: "", name: "Virtual Accounting", quantity: 1, price: 84000 }] }, {
+      key: "annual-2026",
+      description: "Annual payment, 1 Sep 2026 to 31 Aug 2027",
+      discountPercent: 5,
+    });
+
+    expect(captured.body).toMatchObject({ discount_type: "item_level", is_discount_before_tax: true });
+    const lineItem = (captured.body!.line_items as Array<Record<string, unknown>>)[0]!;
+    expect(lineItem).toMatchObject({ rate: 84000, quantity: 1, discount: "5%", tax_id: "2273874000000030203" });
+  });
+
+  it("sends no discount fields when no discount is given", async () => {
+    const captured = mockZohoFetch();
+
+    await createEstimate("zcust-1", deal, { key: "2026-10" });
+
+    expect(captured.body).not.toHaveProperty("discount_type");
+    const lineItem = (captured.body!.line_items as Array<Record<string, unknown>>)[0]!;
+    expect(lineItem).not.toHaveProperty("discount");
+  });
 });
 
 describe("searchCustomers / getCustomer", () => {

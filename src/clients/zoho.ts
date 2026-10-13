@@ -232,6 +232,7 @@ export interface EstimateLine {
   key: string; // suffix of the Zoho reference number: "<dealId>/<key>"
   name?: string; // line item name; "Virtual Accounting" for a billing cycle
   description?: string | null; // printed beneath the name (service period / narration)
+  discountPercent?: number; // shown in the line's Discount column, taken off before GST/TDS
 }
 
 // `line` marks a billing cycle or a one-time quote: one line item, named
@@ -265,9 +266,11 @@ export async function createEstimate(
     body: JSON.stringify({
       customer_id: customerId,
       reference_number: line ? `${deal.dealId}/${line.key}` : deal.dealId,
+      ...(line?.discountPercent ? { discount_type: "item_level", is_discount_before_tax: true } : {}),
       line_items: [
         {
           ...lineItem,
+          ...(line?.discountPercent ? { discount: `${line.discountPercent}%` } : {}),
           tax_id: taxId,
           tds_tax_id: PROFESSIONAL_FEES_TDS_TAX_ID,
         },
