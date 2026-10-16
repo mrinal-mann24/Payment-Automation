@@ -42,7 +42,7 @@ export interface HubspotDeal {
   dealId: string;
   dealName: string;
   billingPeriod: string | null;
-  contactEmail: string; // Zoho customer identity: the associated contact, or the Accountant Email when there is no contact
+  contactEmail: string | null; // the associated contact's email, else the first Accountant Email; null when the deal has neither
   contactName: string;
   contactPhone: string | null;
   // Where quotes and invoices are emailed: every Accountant Email field
@@ -161,10 +161,10 @@ export async function fetchDealWithLineItemsAndContact(dealId: string): Promise<
   // contact can still be billed when an Accountant Email is set.
   const contactEmail = asEmail(contact?.properties.email);
   const billingEmails = parseEmailList(deal.properties.accountant_email);
+  // No email at all is allowed (decision 2026-10-16): the Zoho customer is
+  // the one mapped on the admin page, the quote still goes to the WhatsApp
+  // group, and only the email is skipped.
   const identityEmail = contactEmail ?? billingEmails[0] ?? null;
-  if (!identityEmail) {
-    throw new Error(`HubSpot deal ${dealId} has no associated contact email and no valid Accountant Email`);
-  }
   const contactName = contact
     ? [contact.properties.firstname, contact.properties.lastname].filter(Boolean).join(" ")
     : (deal.properties.billing_poc_name ?? "").trim();

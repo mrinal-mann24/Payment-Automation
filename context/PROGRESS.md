@@ -132,6 +132,15 @@ Last updated: 2026-09-29 (5th/9th/12th reminders with a Sunday shift, per-client
   (see `ARCHITECTURE.md` §3.6, §6).
 
 ## Changelog
+- 2026-10-16 (a deal with no email can be quoted) — Root Botanie's one-time
+  quote failed with "no associated contact email and no valid Accountant
+  Email": `fetchDealWithLineItemsAndContact` still demanded an email as the
+  Zoho customer identity, a leftover from before the customer was mapped by
+  id on the admin page. It no longer throws; `HubspotDeal.contactEmail` is
+  `string | null` (nothing reads it). A deal with no email is quoted to its
+  WhatsApp group and only the email is skipped, recorded on the row as "no
+  Accountant Email on the HubSpot deal" (the existing behaviour). Files:
+  `src/clients/hubspot.ts`, `src/test/hubspotEmails.test.ts`.
 - 2026-10-13 (Supabase base price is the price; HubSpot is the fallback) —
   Reverses the 2026-09-28 rule. `createZohoEstimate` now bills
   `client_pricing.base_price` × the cycle length for a cycle quote (and the

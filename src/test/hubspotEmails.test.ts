@@ -106,10 +106,13 @@ describe("fetchDealWithLineItemsAndContact — billing emails", () => {
     expect(deal.contactPhone).toBeNull();
   });
 
-  it("still refuses a deal with no contact email and no valid Accountant Email", async () => {
+  it("still returns a deal with no contact email and no valid Accountant Email — the quote goes to the WhatsApp group, nothing is emailed", async () => {
     mockDealFetch({ accountantEmail: "NA", pocEmail: "poc@acme.example", contact: null });
 
-    await expect(fetchDealWithLineItemsAndContact("deal-1")).rejects.toThrow(/no associated contact email and no valid Accountant Email/);
+    const deal = await fetchDealWithLineItemsAndContact("deal-1");
+
+    expect(deal.contactEmail).toBeNull();
+    expect(deal.billingEmails).toEqual([]);
   });
 });
 
